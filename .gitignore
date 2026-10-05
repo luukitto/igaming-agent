@@ -1,0 +1,5 @@
+__pycache__/
+casino.db
+eval_out.txt
+.DS_Store
+.idea/
