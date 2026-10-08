@@ -177,10 +177,15 @@ def propose_action(player_id: int, action: str, reason: str, weekly_deposit_limi
         return {"error": f"unknown action {action!r}, available: {list(ACTIONS)}"}
     if "error" in (player := get_player(player_id)):
         return player
+    # Refuse proposals that would do nothing when approved, so an "approved" row in the audit log always means a change
+    if action == "block_account" and player["account_status"] != "active":
+        return {"error": f"the account is {player['account_status']}, block_account only applies to active accounts"}
     params = {}
     if action == "apply_deposit_limit":
         if not isinstance(weekly_deposit_limit, (int, float)) or weekly_deposit_limit <= 0:
             return {"error": "apply_deposit_limit needs a positive weekly_deposit_limit"}
+        if (current := player["weekly_deposit_limit"]) and weekly_deposit_limit >= current:
+            return {"error": f"a limit can only be lowered, the current weekly limit is {current}"}
         params = {"limit": float(weekly_deposit_limit)}
     return {"proposal": {"player_id": player_id, "action": action, "params": params, "reason": reason},
             "status": "waiting for human approval. Tell the user it is proposed, not done."}

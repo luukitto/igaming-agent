@@ -74,8 +74,8 @@
 
   <div class="card">
     <h2>Approvals &amp; audit log</h2>
-    <p class="meta">The agent can only propose actions. Nothing changes until a person approves, and every decision is logged.</p>
-    <label class="meta">Your name <input id="approver" maxlength="100" placeholder="e.g. j.smith"></label>
+    <p class="meta">The agent can only propose actions. Nothing changes until a person approves, and every decision is logged.
+      Approving asks you to log in; the audit log records your login name.</p>
     <ul id="log" class="log"></ul>
   </div>
 </main>
@@ -122,10 +122,6 @@ function render({ answer, report, tool_calls }) {
   $("result").hidden = false;
 }
 
-// Approver name: remembered per browser only as a convenience; the server logs whatever is sent.
-try { $("approver").value = localStorage.getItem("approver") || ""; } catch {}
-$("approver").onchange = () => { try { localStorage.setItem("approver", $("approver").value.trim()); } catch {} };
-
 async function loadLog() {
   const r = await fetch("/actions");
   if (r.ok) $("log").replaceChildren(...(await r.json()).map(logItem));
@@ -154,11 +150,9 @@ function logItem(a) {
 }
 
 async function decide(id, approve, row) {
-  const by = $("approver").value.trim();
-  if (by.length < 2) { $("approver").focus(); $("approver").reportValidity?.(); alert("Enter your name first: it goes in the audit log."); return; }
   row.querySelectorAll("button").forEach(b => b.disabled = true);
   const r = await fetch(`/actions/${id}/decision`, { method: "POST", headers: { "Content-Type": "application/json" },
-                                                    body: JSON.stringify({ approve, by }) });
+                                                    body: JSON.stringify({ approve }) });
   if (!r.ok) alert((await r.json()).detail);
   loadLog();
 }

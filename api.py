@@ -6,16 +6,35 @@ Try:   curl -X POST localhost:8000/investigate -H 'Content-Type: application/jso
 Docs:  http://localhost:8000/docs
 UI:    http://localhost:8000
 """
+import os
+import secrets
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
 import actions
 from agent import MODEL, Report, investigate
 
 app = FastAPI(title="iGaming Ops Agent")
+
+# Approvers log in with HTTP Basic (the browser shows its own login prompt).
+# APPROVERS="j.smith:secret1,a.lee:secret2". Unset means nobody can approve.
+# ponytail: shared passwords in an env var; behind SSO (OIDC), read the user from its token instead.
+APPROVERS = {name: pw for name, _, pw in (u.strip().partition(":") for u in os.environ.get("APPROVERS", "").split(","))
+             if name and pw}
+basic = HTTPBasic(realm="approvers")
+
+
+def approver(c: HTTPBasicCredentials = Depends(basic)) -> str:
+    """The logged-in approver's name. It goes in the audit log, so it must come from the login, not the request body."""
+    # compare_digest even for unknown users, so response time doesn't reveal which names exist
+    ok = secrets.compare_digest(c.password.encode(), APPROVERS.get(c.username, "").encode())
+    if not (ok and c.username in APPROVERS):
+        raise HTTPException(401, "wrong username or password", headers={"WWW-Authenticate": 'Basic realm="approvers"'})
+    return c.username
 
 
 class Question(BaseModel):
@@ -31,9 +50,6 @@ class Investigation(BaseModel):
 
 class Decision(BaseModel):
     approve: bool
-    # ponytail: the client says who it is. Behind real auth (SSO), take this from the session instead,
-    # or the audit log records whatever name was typed.
-    by: str = Field(min_length=2, max_length=100)
 
 
 @app.post("/investigate", response_model=Investigation)
@@ -54,9 +70,9 @@ def get_actions():
 
 
 @app.post("/actions/{action_id}/decision")
-def post_decision(action_id: int, d: Decision):
+def post_decision(action_id: int, d: Decision, by: str = Depends(approver)):
     try:
-        return actions.decide(action_id, d.approve, d.by)
+        return actions.decide(action_id, d.approve, by)
     except LookupError as e:
         raise HTTPException(409, str(e))
 

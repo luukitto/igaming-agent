@@ -55,7 +55,7 @@ The thresholds and weights are hand-picked. The minimum bet counts stop random n
 
 ### Write actions, human approval and the audit log
 
-The agent can't change anything. `propose_action` only validates the proposal and returns it. The API saves it as **pending** in the `actions` table and shows it in the UI, where a person enters their name and clicks **Approve** or **Reject**. Only an approved action has an effect, applied in the same transaction as the decision by `actions.py`, the only module that opens the DB for writing:
+The agent can't change anything. `propose_action` only validates the proposal and returns it. It refuses proposals that would do nothing if approved (blocking an account that isn't active, or a deposit limit that isn't lower than the current one), so an approved row always means a real change. The API saves it as **pending** (if the same action is already pending for that player, it reuses it rather than queueing a duplicate) in the `actions` table and shows it in the UI, where a person logs in and clicks **Approve** or **Reject**. Only an approved action has an effect, applied in the same transaction as the decision by `actions.py`, the only module that opens the DB for writing:
 
 | Action | Effect when approved |
 |---|---|
@@ -65,12 +65,12 @@ The agent can't change anything. `propose_action` only validates the proposal an
 
 The `actions` table is the audit trail: who proposed what and why, the original question, who approved or rejected it, and when. The **database** enforces it with triggers, so even a bug in the app can't rewrite history: rows can't be deleted, a decision is final, and the proposal can't be edited afterwards.
 
-The approver's name comes from the request. Behind real authentication (SSO) it should come from the login session instead. Re-running `seed.py` rebuilds the DB, which also wipes the audit log; in production the audit log would live in its own store.
+Approvers log in with HTTP Basic auth (the browser shows its own prompt). Accounts come from the `APPROVERS` env var, `name:password` pairs separated by commas; if it isn't set, nobody can approve. The audit log records the **login** name, never a name sent in the request. In production this would be SSO (OIDC), with the user taken from its token. Re-running `seed.py` rebuilds the DB, which also wipes the audit log; in production the audit log would live in its own store.
 
 ```bash
 curl localhost:8000/actions                                   # audit log, pending first
-curl -X POST localhost:8000/actions/1/decision -H 'Content-Type: application/json' \
-     -d '{"approve": true, "by": "j.smith"}'
+curl -X POST localhost:8000/actions/1/decision -u j.smith:secret1 -H 'Content-Type: application/json' \
+     -d '{"approve": true}'
 ```
 
 ### Safety and robustness choices
@@ -95,7 +95,7 @@ curl -X POST localhost:8000/actions/1/decision -H 'Content-Type: application/jso
 |---|---|---|
 | 1042 | Big win, withdrawal declined | KYC still `pending`, so ask for ID documents |
 | 1077 | Took a 100 bonus, withdrawal declined | Wagered ~900 of the required 35 × 100 = 3500 |
-| 1100 | Deposits 20 → 1000 in two weeks, all play 1 to 5 am, hit deposit limit | Responsible gambling risk, escalate, no promotions |
+| 1100 | Deposits 20 → 1000 in two weeks, all play 1 to 5 am, hit their 3500 weekly deposit limit | Responsible gambling risk, escalate, no promotions |
 | 1150 | Self-excluded, tried to deposit | Must not reopen the account; notify the RG team |
 | 1180 | Doubles the stake after every loss, 4-hour sessions, cancels withdrawals to keep playing | Loss chasing; second on the risk ranking, for different reasons than 1100 |
 
@@ -107,7 +107,7 @@ pip install -r requirements.txt
 python seed.py                                        # build casino.db
 
 python agent.py "Why was player 1042's withdrawal declined?"   # CLI
-uvicorn api:app --reload                              # UI at localhost:8000, API docs at /docs
+APPROVERS=j.smith:secret1 uvicorn api:app --reload    # UI at localhost:8000, API docs at /docs
 ```
 
 ```bash
@@ -121,7 +121,7 @@ Ollama stays on the host (the models are GBs). The container reaches it through 
 
 ```bash
 docker build -t igaming-agent .
-docker run -p 8000:8000 igaming-agent
+docker run -p 8000:8000 -e APPROVERS=j.smith:secret1 igaming-agent
 ```
 
 ## Testing and eval
@@ -131,13 +131,13 @@ python test_tools.py   # instant, no LLM: tools, RG score, approvals and audit l
 python eval.py         # end-to-end on the planted cases (slow on CPU, real LLM)
 ```
 
-`eval.py` runs the whole agent on each case in `eval_cases.json` and checks three things: the report's **category**, its **escalation flag**, and whether the **answer** mentions the key fact (for example "3500" for the bonus case). One case is a player who doesn't exist, to check that the agent says so instead of making up a reason. Swap models with `MODEL=llama3.1:8b python eval.py`.
+`eval.py` runs the whole agent on each case in `eval_cases.json` and checks four things: the report's **category**, its **escalation flag**, whether the **answer** mentions the key fact (for example "3500" for the bonus case), and whether the agent **proposed the right actions** (for example `request_kyc_documents` for 1042, never `block_account` for the self-excluded 1150). One case is a player who doesn't exist, to check that the agent says so instead of making up a reason. Swap models with `MODEL=llama3.1:8b python eval.py`.
 
 <!-- EVAL_RESULTS -->
 
 ## What I'd do next
 
-- **Real authentication** for approvers, and four-eyes approval (two people) for `block_account`
+- **SSO** for approvers instead of Basic auth, and four-eyes approval (two people) for `block_account`
 - **Calibrate the risk score** on cases the RG team labels, and run `top_risk_players` on a schedule so the team gets a daily list
 - **More eval cases**, and an LLM-as-judge score for answer quality instead of keyword checks
 - **Streaming** the agent's steps to a small UI, so support staff can watch it investigate

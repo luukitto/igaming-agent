@@ -40,7 +40,13 @@ def connect():
 
 
 def propose(player_id, action, params, reason, question, proposed_by):
+    """Save a proposal as pending. If the same action is already pending, return that one:
+    asking about a player twice shouldn't queue the same action twice."""
     with connect() as con:
+        dup = con.execute("SELECT id FROM actions WHERE status = 'pending' AND player_id = ? AND action = ? AND params = ?",
+                          (player_id, action, json.dumps(params))).fetchone()
+        if dup:
+            return get(dup["id"])
         cur = con.execute("INSERT INTO actions (player_id, action, params, reason, question, proposed_by) "
                           "VALUES (?,?,?,?,?,?)", (player_id, action, json.dumps(params), reason, question, proposed_by))
     return get(cur.lastrowid)

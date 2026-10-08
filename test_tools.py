@@ -40,6 +40,9 @@ assert get_rg_signals(1042)["risk_score"] == 0 and "error" in get_rg_signals(999
 assert "error" in propose_action(1100, "delete_player", "x")
 assert "error" in propose_action(1100, "apply_deposit_limit", "x")  # limit missing
 assert "error" in propose_action(9999, "block_account", "x")
+# proposals that would do nothing when approved are refused, so "approved" always means a change
+assert "error" in propose_action(1150, "block_account", "x")  # self-excluded
+assert "error" in propose_action(1100, "apply_deposit_limit", "x", weekly_deposit_limit=5000)  # current is 3500
 p = propose_action(1100, "apply_deposit_limit", "RG", weekly_deposit_limit=500)["proposal"]
 
 # approvals run against a throwaway copy of the DB, so tests never add to the real audit log
@@ -47,6 +50,7 @@ actions.PATH = Path(tempfile.mkdtemp()) / "casino.db"
 shutil.copy(Path(__file__).parent / "casino.db", actions.PATH)
 a = actions.propose(**p, question="q", proposed_by="agent:test")
 assert a["status"] == "pending" and a["params"] == {"limit": 500}
+assert actions.propose(**p, question="asked again", proposed_by="agent:test")["id"] == a["id"]  # no duplicate
 assert actions.decide(a["id"], True, "alice")["decided_by"] == "alice"
 with actions.connect() as con:
     assert con.execute("SELECT weekly_deposit_limit FROM players WHERE id = 1100").fetchone()[0] == 500
@@ -76,4 +80,19 @@ for sql in ("DELETE FROM actions", "UPDATE actions SET decided_by = 'mallory'",
         raise AssertionError(f"audit log allowed: {sql}")
     except sqlite3.IntegrityError:
         pass
+# approvers must log in: the audit log gets the login name, never a name from the request
+import os
+os.environ["APPROVERS"] = " alice:s3cret, broken, :nouser, nopw:"
+from fastapi import HTTPException
+from fastapi.security import HTTPBasicCredentials
+import api
+assert api.APPROVERS == {"alice": "s3cret"}
+for user, pw in (("alice", "wrong"), ("mallory", "s3cret"), ("nopw", ""), ("", "")):
+    try:
+        api.approver(HTTPBasicCredentials(username=user, password=pw)); raise AssertionError(f"logged in: {user}")
+    except HTTPException as e:
+        assert e.status_code == 401 and "Basic" in e.headers["WWW-Authenticate"]
+by = api.approver(HTTPBasicCredentials(username="alice", password="s3cret"))
+pending = actions.propose(1180, "flag_for_rg_review", {}, "x", "q", "agent:test")
+assert api.post_decision(pending["id"], api.Decision(approve=True, by="mallory"), by)["decided_by"] == "alice"
 print("ok")

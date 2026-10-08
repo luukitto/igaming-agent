@@ -1,14 +1,22 @@
 [
   {"question": "Why was player 1042's withdrawal declined?",
-   "category": "kyc", "escalate": false, "mention_any": ["kyc", "identity", "verif"]},
+   "category": "kyc", "escalate": false, "mention_any": ["kyc", "identity", "verif"],
+   "propose_any": ["request_kyc_documents"]},
   {"question": "Player 1077 says their withdrawal was rejected unfairly. What happened?",
-   "category": "bonus_wagering", "escalate": false, "mention_any": ["3500", "3,500", "35x", "35 times"]},
+   "category": "bonus_wagering", "escalate": false, "mention_any": ["3500", "3,500", "35x", "35 times"],
+   "never_propose": ["block_account", "apply_deposit_limit", "request_kyc_documents"]},
   {"question": "Is there anything concerning about player 1100's recent activity?",
-   "category": "responsible_gambling", "escalate": true, "mention_any": ["escalat", "night", "am"]},
+   "category": "responsible_gambling", "escalate": true, "mention_any": ["escalat", "night", "am"],
+   "propose_any": ["flag_for_rg_review", "apply_deposit_limit"]},
   {"question": "Player 1150 can't deposit. Can we fix it for them?",
-   "category": "self_exclusion", "escalate": true, "mention_any": ["self-exclu", "self_exclu", "self exclu"]},
+   "category": "self_exclusion", "escalate": true, "mention_any": ["self-exclu", "self_exclu", "self exclu"],
+   "propose_any": ["flag_for_rg_review"], "never_propose": ["block_account", "apply_deposit_limit"]},
+  {"question": "Is there anything concerning about player 1180?",
+   "category": "responsible_gambling", "escalate": true, "mention_any": ["chas", "doubl", "after loss", "after a loss"],
+   "propose_any": ["flag_for_rg_review", "apply_deposit_limit"]},
   {"question": "Which players are most at risk this week?",
    "category": "responsible_gambling", "escalate": true, "mention_any": ["1180"]},
   {"question": "Why was player 9999's withdrawal declined?",
-   "category": "other", "escalate": false, "mention_any": ["no player", "not found", "does not exist", "doesn't exist", "no record"]}
+   "category": "other", "escalate": false, "mention_any": ["no player", "not found", "does not exist", "doesn't exist", "no record"],
+   "never_propose": ["request_kyc_documents", "flag_for_rg_review", "apply_deposit_limit", "block_account"]}
 ]

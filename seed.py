@@ -139,6 +139,7 @@ def seed():
         for _ in range(8):
             stake = round(amount / 6, 2)
             bet(db, 1100, day, hour=hour, stake=stake, payout=stake * 2 if random.random() < 0.15 else 0)
+    db.execute("UPDATE players SET weekly_deposit_limit = 3500 WHERE id = 1100")  # the 3400 + 1000 below breaks it
     tx(db, 1100, "deposit", 1000, 0, status="declined", reason="deposit_limit_reached", hour=3)
 
     # --- 1150: self-excluded, tried to deposit anyway -------------------------
