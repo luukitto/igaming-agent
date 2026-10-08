@@ -5,6 +5,7 @@ Random players and activity, plus planted cases the agent must be able to explai
   1077  withdrawal declined: bonus wagering requirement not met
   1100  risky gambling pattern: escalating deposits, late-night play, chasing losses
   1150  self-excluded player whose deposit attempt was declined
+  1180  loss chasing: doubles the stake after every loss, 4-hour sessions, cancels withdrawals to keep playing
 
 Run:  python seed.py   (re-running rebuilds the same data: the random seed is fixed)
 """
@@ -20,17 +21,36 @@ SCHEMA = """
 CREATE TABLE players (
   id INTEGER PRIMARY KEY, username TEXT NOT NULL, country TEXT, registered_at TEXT,
   kyc_status TEXT CHECK (kyc_status IN ('verified', 'pending', 'rejected')),
-  account_status TEXT CHECK (account_status IN ('active', 'self_excluded', 'blocked')));
+  account_status TEXT CHECK (account_status IN ('active', 'self_excluded', 'blocked')),
+  weekly_deposit_limit REAL);
 CREATE TABLE games (
   id INTEGER PRIMARY KEY, name TEXT, provider TEXT, category TEXT, rtp REAL);
 CREATE TABLE transactions (
   id INTEGER PRIMARY KEY, player_id INTEGER REFERENCES players(id),
   type TEXT CHECK (type IN ('deposit', 'withdrawal', 'bonus')), amount REAL,
-  status TEXT CHECK (status IN ('completed', 'pending', 'declined')),
+  status TEXT CHECK (status IN ('completed', 'pending', 'declined', 'cancelled')),
   decline_reason TEXT, created_at TEXT);
 CREATE TABLE bets (
   id INTEGER PRIMARY KEY, player_id INTEGER REFERENCES players(id),
   game_id INTEGER REFERENCES games(id), stake REAL, payout REAL, created_at TEXT);
+
+-- Actions the agent proposed and a person approved or rejected. This is the audit
+-- trail, so the database itself enforces it: no deletes, and a decision is final.
+CREATE TABLE actions (
+  id INTEGER PRIMARY KEY, player_id INTEGER NOT NULL REFERENCES players(id),
+  action TEXT NOT NULL CHECK (action IN
+    ('request_kyc_documents', 'flag_for_rg_review', 'apply_deposit_limit', 'block_account')),
+  params TEXT NOT NULL DEFAULT '{}', reason TEXT NOT NULL, question TEXT,
+  proposed_by TEXT NOT NULL, proposed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  decided_by TEXT, decided_at TEXT);
+CREATE TRIGGER actions_no_delete BEFORE DELETE ON actions
+  BEGIN SELECT RAISE(ABORT, 'the audit log is append-only'); END;
+CREATE TRIGGER actions_decide_once BEFORE UPDATE ON actions
+  WHEN OLD.status != 'pending' OR NEW.decided_by IS NULL
+    OR (NEW.id, NEW.player_id, NEW.action, NEW.params, NEW.reason, NEW.question, NEW.proposed_by, NEW.proposed_at)
+       IS NOT (OLD.id, OLD.player_id, OLD.action, OLD.params, OLD.reason, OLD.question, OLD.proposed_by, OLD.proposed_at)
+  BEGIN SELECT RAISE(ABORT, 'only a pending action can be decided, once, and the proposal cannot change'); END;
 """
 
 GAMES = [  # (name, provider, category, rtp)  all fictional
@@ -42,23 +62,24 @@ GAMES = [  # (name, provider, category, rtp)  all fictional
     ("Plinko Drop", "Orbit Labs", "crash", 0.97), ("Mega Wheel", "LiveCore", "live", 0.96),
 ]
 COUNTRIES = ["GE", "DE", "BR", "CA", "FI", "MT", "PE", "NZ"]
-PLANTED = {1042, 1077, 1100, 1150}
+PLANTED = {1042, 1077, 1100, 1150, 1180}
 
 
-def at(days_ago, hour=None):
+def at(days_ago, hour=None, minute=None):
     hour = random.randint(9, 23) if hour is None else hour
-    t = (TODAY - timedelta(days=days_ago)).replace(hour=hour, minute=random.randint(0, 59))
+    minute = random.randint(0, 59) if minute is None else minute
+    t = (TODAY - timedelta(days=days_ago)).replace(hour=hour, minute=minute)
     return t.isoformat(sep=" ", timespec="minutes")
 
 
-def bet(db, player, day, hour=None, stake=None, win_chance=0.45, payout=None):
+def bet(db, player, day, hour=None, stake=None, win_chance=0.45, payout=None, minute=None):
     game_id, (_, _, _, rtp) = random.choice(list(enumerate(GAMES, start=1)))
     stake = stake or round(random.uniform(0.5, 20), 2)
     # ponytail: crude win model (win ~2.1x stake, else 0), roughly matches rtp on average
     if payout is None:
         payout = round(stake * rtp / win_chance, 2) if random.random() < win_chance else 0
     db.execute("INSERT INTO bets (player_id, game_id, stake, payout, created_at) VALUES (?,?,?,?,?)",
-               (player, game_id, stake, payout, at(day, hour)))
+               (player, game_id, stake, payout, at(day, hour, minute)))
 
 
 def tx(db, player, type_, amount, day, status="completed", reason=None, hour=None):
@@ -67,7 +88,8 @@ def tx(db, player, type_, amount, day, status="completed", reason=None, hour=Non
 
 
 def add_player(db, pid, kyc="verified", status="active", registered_days_ago=None):
-    db.execute("INSERT INTO players VALUES (?,?,?,?,?,?)",
+    db.execute("INSERT INTO players (id, username, country, registered_at, kyc_status, account_status) "
+               "VALUES (?,?,?,?,?,?)",
                (pid, f"player{pid}", random.choice(COUNTRIES),
                 at(registered_days_ago or random.randint(60, 700)), kyc, status))
 
@@ -124,11 +146,24 @@ def seed():
     tx(db, 1150, "deposit", 50, 90)
     tx(db, 1150, "deposit", 100, 3, status="declined", reason="self_exclusion_active")
 
+    # --- 1180: martingale loss chasing, long sessions, cancelled withdrawals --
+    add_player(db, 1180, registered_days_ago=300)
+    for day in range(4, 60, 7):  # steady 200 a week, so no deposit spike: a different risk profile
+        tx(db, 1180, "deposit", 200, day)
+    for day in (5, 3, 1):
+        if day != 1:  # asks for a withdrawal, cancels it, then plays the money
+            tx(db, 1180, "withdrawal", 200, day, status="cancelled", hour=12)
+        stake = 5
+        for i in range(48):  # a 4-hour session, one bet every 5 minutes
+            won = random.random() < 0.45
+            bet(db, 1180, day, hour=13 + i // 12, minute=i % 12 * 5, stake=stake, payout=stake * 2 if won else 0)
+            stake = 5 if won else min(stake * 2, 160)  # double the stake after every loss
+
     db.commit()
     return db
 
 
 if __name__ == "__main__":
     db = seed()
-    for table in ("players", "games", "transactions", "bets"):
+    for table in ("players", "games", "transactions", "bets", "actions"):
         print(f"{table:12} {db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]:>6} rows")

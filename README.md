@@ -4,8 +4,9 @@ An LLM agent that investigates player issues on a (fake) online casino platform,
 
 > *"Why was player 1042's withdrawal declined?"*
 > *"Is there anything concerning about player 1100's recent activity?"*
+> *"Which players are most at risk this week?"*
 
-The agent looks up the player's data with **tools** (SQL over a casino database), reads the relevant **policy** (RAG), and returns a free-text answer and a **typed, validated report** (category, root cause, evidence, recommended action, escalation flag), served over a **FastAPI** endpoint.
+The agent looks up the player's data with **tools** (SQL over a casino database), reads the relevant **policy** (RAG), and returns a free-text answer and a **typed, validated report** (category, root cause, evidence, recommended action, escalation flag), served over a **FastAPI** endpoint. It can also **propose actions** (request KYC documents, flag for RG review, set a deposit limit, block an account). They only happen after a person approves them in the UI, and every decision goes into an audit log.
 
 Everything runs locally and free with [Ollama](https://ollama.com) (`qwen3:4b`). There are no API keys and no frameworks: the agent loop is about 30 lines of plain Python, so every step is visible.
 
@@ -15,36 +16,80 @@ Everything runs locally and free with [Ollama](https://ollama.com) (`qwen3:4b`).
 flowchart LR
     Q[Question] --> L{LLM}
     L -->|tool call| T[Tools]
-    T -->|get_player / get_transactions /<br>get_betting_summary| DB[(casino.db<br>read-only)]
+    T -->|get_player / get_transactions /<br>get_betting_summary / get_rg_signals /<br>top_risk_players| DB[(casino.db<br>read-only)]
     T -->|search_policy| P[policies.md<br>embedded]
+    T -->|propose_action| PR[Proposal<br>changes nothing]
     T -->|result as JSON| L
     L -->|no more tool calls| A[Answer]
     A -->|JSON-schema constrained| R[Report<br>pydantic]
+    PR -->|saved as pending| AU[(actions<br>audit log)]
+    H((Person)) -->|Approve / Reject| AU
+    AU -->|approved: apply effect| DB
 ```
 
 1. **Agent loop** (`run_agent`): send the question plus the tool descriptions (JSON Schema) to the LLM. If it asks for a tool, run the Python function, append the result to the conversation, and repeat. When it answers without tool calls, we're done. `max_steps` caps runaway loops.
-2. **Tools**: four plain functions. The LLM never touches the DB, it can only *ask* us to run these:
+2. **Tools**: plain functions. The LLM never touches the DB, it can only *ask* us to run these:
    - `get_player`: KYC status, account status (active / self-excluded / blocked)
    - `get_transactions`: deposits, withdrawals, bonuses, with decline reasons
    - `get_betting_summary`: totals computed in SQL (staked, payout, net, share of bets placed between midnight and 5 am, wagered since the last bonus). The tool does the arithmetic because small LLMs can't reliably add up 100 numbers.
+   - `get_rg_signals`: responsible gambling signals for one player (see below) and a 0 to 100 risk score with reasons
+   - `top_risk_players`: the same score for every player, ranked, so the agent can answer "who is most at risk this week?" instead of only questions about one player
    - `search_policy`: RAG over `policies.md` (one chunk per section, `nomic-embed-text`, cosine similarity)
+   - `propose_action`: proposes `request_kyc_documents`, `flag_for_rg_review`, `apply_deposit_limit` or `block_account`. It changes nothing (see below)
 3. **Structured output** (`to_report`): a second call with Ollama's `format=<JSON schema>` constrains generation to the `Report` schema, and pydantic validates it. This is a separate call because small models handle tools and forced JSON badly at the same time.
+
+### Responsible gambling risk score
+
+`rg_scores` computes the signals in SQL (window functions) for every player over the last N days, then adds up points:
+
+| Signal | Rule | Points |
+|---|---|---|
+| Deposit pattern change | deposits ≥ 3× the usual amount (previous 4 weeks) and ≥ 200 | 25 |
+| Night play | ≥ 50% of bets between midnight and 5 am (≥ 10 bets) | 20 |
+| Loss chasing | average stake after a loss ≥ 2× the average stake after a win (≥ 30 bets) | 20 |
+| Re-gambled withdrawals | a cancelled withdrawal followed by bets within 24 h | 15 |
+| Session length | a session (no gap over 30 min) of 3+ hours | 10 |
+| Deposit limit hit | a deposit declined with `deposit_limit_reached` | 10 |
+
+The thresholds and weights are hand-picked. The minimum bet counts stop random noise from looking like loss chasing. A real platform would calibrate them on cases the RG team has labelled.
+
+### Write actions, human approval and the audit log
+
+The agent can't change anything. `propose_action` only validates the proposal and returns it. The API saves it as **pending** in the `actions` table and shows it in the UI, where a person enters their name and clicks **Approve** or **Reject**. Only an approved action has an effect, applied in the same transaction as the decision by `actions.py`, the only module that opens the DB for writing:
+
+| Action | Effect when approved |
+|---|---|
+| `request_kyc_documents`, `flag_for_rg_review` | none in the DB: the approved row is the work item for the KYC / RG team |
+| `apply_deposit_limit` | sets the weekly deposit limit, but can only **lower** an existing one (the policy requires a cooling period for increases) |
+| `block_account` | blocks an active account; a self-excluded player stays self-excluded |
+
+The `actions` table is the audit trail: who proposed what and why, the original question, who approved or rejected it, and when. The **database** enforces it with triggers, so even a bug in the app can't rewrite history: rows can't be deleted, a decision is final, and the proposal can't be edited afterwards.
+
+The approver's name comes from the request. Behind real authentication (SSO) it should come from the login session instead. Re-running `seed.py` rebuilds the DB, which also wipes the audit log; in production the audit log would live in its own store.
+
+```bash
+curl localhost:8000/actions                                   # audit log, pending first
+curl -X POST localhost:8000/actions/1/decision -H 'Content-Type: application/json' \
+     -d '{"approve": true, "by": "j.smith"}'
+```
 
 ### Safety and robustness choices
 
 | Risk | What the code does |
 |---|---|
 | SQL injection via LLM-chosen arguments | `?` placeholders only, and a test proves an injection string matches nothing |
-| LLM modifying data | DB opened **read-only** (`mode=ro`) |
+| LLM modifying data | Agent's DB connection is **read-only** (`mode=ro`); writes happen only in `actions.py`, after a person approves |
+| Rewriting the audit trail | DB triggers: no deletes, a decision is final, proposals can't be edited |
+| Two people deciding the same action | The decision only applies `WHERE status = 'pending'`; the second one gets `409` |
 | Hallucinated tool name or bad arguments | `call_tool` returns the error *to the model* so it can retry, instead of crashing |
 | Shallow answers ("declined: kyc_not_verified", no next step) | Guardrail: if the model tries to answer without checking policy, it is nudged once to call `search_policy` |
 | Infinite tool loops | `max_steps=8` |
 | Unparseable output | Schema-constrained decoding plus pydantic validation |
-| Ollama down | API returns `503` with a clear message |
+| Ollama down, dropping the connection or too slow | API returns `503` with a clear message; each LLM call times out after `OLLAMA_TIMEOUT` seconds (default 900; a single call took up to ~6.5 min on an Intel MacBook CPU) |
 
 ## The data
 
-`seed.py` builds `casino.db` (SQLite) with 200 random players, 12 fictional games, and transactions and bets, with a fixed random seed so the data is the same every run. It also plants four cases the agent must explain:
+`seed.py` builds `casino.db` (SQLite) with 200 random players, 12 fictional games, and transactions and bets, with a fixed random seed so the data is the same every run. It also plants five cases the agent must explain:
 
 | Player | Situation | What the agent should find |
 |---|---|---|
@@ -52,6 +97,7 @@ flowchart LR
 | 1077 | Took a 100 bonus, withdrawal declined | Wagered ~900 of the required 35 × 100 = 3500 |
 | 1100 | Deposits 20 → 1000 in two weeks, all play 1 to 5 am, hit deposit limit | Responsible gambling risk, escalate, no promotions |
 | 1150 | Self-excluded, tried to deposit | Must not reopen the account; notify the RG team |
+| 1180 | Doubles the stake after every loss, 4-hour sessions, cancels withdrawals to keep playing | Loss chasing; second on the risk ranking, for different reasons than 1100 |
 
 ## Quick start
 
@@ -61,7 +107,7 @@ pip install -r requirements.txt
 python seed.py                                        # build casino.db
 
 python agent.py "Why was player 1042's withdrawal declined?"   # CLI
-uvicorn api:app --reload                              # API, docs at localhost:8000/docs
+uvicorn api:app --reload                              # UI at localhost:8000, API docs at /docs
 ```
 
 ```bash
@@ -81,7 +127,7 @@ docker run -p 8000:8000 igaming-agent
 ## Testing and eval
 
 ```bash
-python test_tools.py   # instant, no LLM: tools, ordering, SQL injection, error handling
+python test_tools.py   # instant, no LLM: tools, RG score, approvals and audit log, SQL injection, error handling
 python eval.py         # end-to-end on the planted cases (slow on CPU, real LLM)
 ```
 
@@ -91,7 +137,8 @@ python eval.py         # end-to-end on the planted cases (slow on CPU, real LLM)
 
 ## What I'd do next
 
-- **Write actions with human approval**: tools like `request_kyc_documents` or `flag_for_rg_review` that only run after a person confirms
+- **Real authentication** for approvers, and four-eyes approval (two people) for `block_account`
+- **Calibrate the risk score** on cases the RG team labels, and run `top_risk_players` on a schedule so the team gets a daily list
 - **More eval cases**, and an LLM-as-judge score for answer quality instead of keyword checks
 - **Streaming** the agent's steps to a small UI, so support staff can watch it investigate
 - **Per-player access control**: in a real platform the agent should only see players the operator is allowed to see
@@ -100,8 +147,10 @@ python eval.py         # end-to-end on the planted cases (slow on CPU, real LLM)
 
 | File | What |
 |---|---|
-| `agent.py` | Tools, tool specs, agent loop, policy RAG, structured report |
-| `api.py` | FastAPI: `POST /investigate`, `GET /health` |
+| `agent.py` | Tools, RG risk score, tool specs, agent loop, policy RAG, structured report |
+| `actions.py` | Saves proposals, approve / reject, applies approved actions (the only writer) |
+| `api.py` | FastAPI: `GET /` (UI), `POST /investigate`, `GET /actions`, `POST /actions/{id}/decision`, `GET /health` |
+| `index.html` | Single-page UI: question box, answer, report, tool calls, approvals and audit log |
 | `seed.py` | Builds the fake casino DB with the planted cases |
 | `policies.md` | Fictional platform policies (KYC, bonus wagering, RG, limits, self-exclusion) |
 | `test_tools.py` | Fast offline tests |

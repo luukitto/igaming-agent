@@ -16,7 +16,6 @@ import os
 import re
 import sqlite3
 import sys
-import urllib.error
 import urllib.request
 from functools import cache
 from pathlib import Path
@@ -27,6 +26,7 @@ from pydantic import BaseModel, Field
 HERE = Path(__file__).parent
 OLLAMA = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 MODEL = os.environ.get("MODEL", "qwen3:4b")
+TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", 900))  # seconds per LLM call; one call takes ~6 min on an old Intel CPU
 EMBED_MODEL = "nomic-embed-text"
 TODAY = "2026-10-01"  # matches seed.py, so "last week" means the same thing every run
 # Read-only connection: even a buggy tool can't modify data. check_same_thread=False
@@ -39,9 +39,11 @@ def post(path, payload):
     req = urllib.request.Request(OLLAMA + path, json.dumps(payload).encode(),
                                  {"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=300) as r:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return json.load(r)
-    except urllib.error.URLError as e:
+    except TimeoutError as e:  # a slow read raises this directly, not wrapped in URLError
+        raise RuntimeError(f"Ollama took over {TIMEOUT}s for one call (slow on CPU?). Raise OLLAMA_TIMEOUT.") from e
+    except OSError as e:  # URLError, connection refused or reset mid-call
         raise RuntimeError(f"Can't reach Ollama at {OLLAMA}. Start it with `ollama serve`.") from e
 
 
@@ -84,6 +86,106 @@ def get_betting_summary(player_id: int, days: int = 30) -> dict:
     return summary
 
 
+# --- Responsible gambling: risk signals and a score to rank players by -------
+RG_SQL_BETS = """
+WITH b AS (
+  SELECT player_id, id, created_at, stake,
+         julianday(created_at) - julianday(LAG(created_at) OVER w) AS gap_days,
+         LAG(payout < stake) OVER w AS prev_lost
+  FROM bets WHERE created_at >= date(:today, :window) AND (:pid IS NULL OR player_id = :pid)
+  WINDOW w AS (PARTITION BY player_id ORDER BY created_at, id)),
+s AS (  -- a session ends after 30 minutes without a bet
+  SELECT *, SUM(gap_days IS NULL OR gap_days > 30 / 1440.0)
+              OVER (PARTITION BY player_id ORDER BY created_at, id) AS session FROM b),
+sessions AS (
+  SELECT player_id, (julianday(MAX(created_at)) - julianday(MIN(created_at))) * 1440 AS minutes
+  FROM s GROUP BY player_id, session)
+SELECT player_id, COUNT(*) AS bets,
+       ROUND(AVG(CAST(strftime('%H', created_at) AS INT) < 5), 2) AS night_share,
+       ROUND(AVG(CASE WHEN prev_lost THEN stake END) / AVG(CASE WHEN NOT prev_lost THEN stake END), 2)
+         AS stake_after_loss_vs_after_win,
+       (SELECT ROUND(MAX(minutes)) FROM sessions x WHERE x.player_id = s.player_id) AS longest_session_minutes
+FROM s GROUP BY player_id"""
+
+RG_SQL_MONEY = """
+SELECT player_id,
+  SUM(CASE WHEN type = 'deposit' AND status = 'completed' AND created_at >= date(:today, :window)
+           THEN amount ELSE 0 END) AS deposits,
+  ROUND(SUM(CASE WHEN type = 'deposit' AND status = 'completed' AND created_at < date(:today, :window)
+                 THEN amount ELSE 0 END) * :days / 28.0, 2) AS usual_deposits_previous_4_weeks,
+  SUM(decline_reason IS 'deposit_limit_reached' AND created_at >= date(:today, :window)) AS deposit_limit_hits,
+  SUM(type = 'withdrawal' AND status = 'cancelled' AND created_at >= date(:today, :window) AND EXISTS (
+        SELECT 1 FROM bets b WHERE b.player_id = t.player_id AND b.created_at > t.created_at
+          AND julianday(b.created_at) - julianday(t.created_at) <= 1)) AS cancelled_withdrawals_gambled
+FROM transactions t
+WHERE created_at >= date(:today, :window, '-28 days') AND (:pid IS NULL OR player_id = :pid)
+GROUP BY player_id"""
+
+# ponytail: hand-picked thresholds and weights (sum 100); calibrate them on cases the RG team labels
+RG_RULES = [
+    (lambda s: s["deposits"] >= 200 and s["deposits"] >= 3 * s["usual_deposits_previous_4_weeks"], 25,
+     "deposits at least 3x the usual amount"),
+    (lambda s: s["bets"] >= 10 and s["night_share"] >= 0.5, 20, "most bets placed between midnight and 5 am"),
+    (lambda s: s["bets"] >= 30 and (s["stake_after_loss_vs_after_win"] or 0) >= 2, 20,
+     "raises stakes after losses (loss chasing)"),
+    (lambda s: s["cancelled_withdrawals_gambled"] > 0, 15, "cancelled a withdrawal and gambled the money"),
+    (lambda s: (s["longest_session_minutes"] or 0) >= 180, 10, "sessions of 3+ hours"),
+    (lambda s: s["deposit_limit_hits"] > 0, 10, "hit a deposit limit"),
+]
+RG_EMPTY = {"bets": 0, "night_share": None, "stake_after_loss_vs_after_win": None, "longest_session_minutes": None,
+            "deposits": 0, "usual_deposits_previous_4_weeks": 0, "deposit_limit_hits": 0,
+            "cancelled_withdrawals_gambled": 0}
+
+
+def rg_scores(days=7, player_id=None) -> dict[int, dict]:
+    """Signals for every player with activity in the last `days` days, plus a 0-100 risk score."""
+    params = {"today": TODAY, "window": f"-{int(days)} days", "days": int(days), "pid": player_id}
+    players = {}
+    for row in [*DB.execute(RG_SQL_BETS, params), *DB.execute(RG_SQL_MONEY, params)]:
+        players.setdefault(row["player_id"], dict(RG_EMPTY)).update(dict(row))
+    for s in players.values():
+        hits = [(points, why) for rule, points, why in RG_RULES if rule(s)]
+        s |= {"risk_score": sum(p for p, _ in hits), "reasons": [why for _, why in hits]}
+    return players
+
+
+def get_rg_signals(player_id: int, days: int = 7) -> dict:
+    if "error" in (player := get_player(player_id)):
+        return player
+    s = rg_scores(days, player_id).get(player_id, RG_EMPTY | {"player_id": player_id, "risk_score": 0, "reasons": []})
+    return s | {"account_status": player["account_status"], "period_days": days}
+
+
+def top_risk_players(days: int = 7, limit: int = 10) -> list[dict]:
+    ranked = sorted(rg_scores(days).values(), key=lambda s: -s["risk_score"])
+    return [{k: s[k] for k in ("player_id", "risk_score", "reasons")} for s in ranked[:int(limit)] if s["risk_score"]]
+
+
+# --- Write actions: the agent only proposes, a person approves (see actions.py) -
+ACTIONS = {
+    "request_kyc_documents": "ask the player to upload a government ID and proof of address",
+    "flag_for_rg_review": "send the account to the responsible gambling team for a safer-gambling interaction",
+    "apply_deposit_limit": "set a weekly deposit limit (needs weekly_deposit_limit); can only lower an existing limit",
+    "block_account": "block the account, for fraud or abuse (not for self-excluded players, they stay excluded)",
+}
+
+
+def propose_action(player_id: int, action: str, reason: str, weekly_deposit_limit: float | None = None) -> dict:
+    """Changes nothing. The proposal goes back to the API, which saves it as pending
+    until a person approves or rejects it."""
+    if action not in ACTIONS:
+        return {"error": f"unknown action {action!r}, available: {list(ACTIONS)}"}
+    if "error" in (player := get_player(player_id)):
+        return player
+    params = {}
+    if action == "apply_deposit_limit":
+        if not isinstance(weekly_deposit_limit, (int, float)) or weekly_deposit_limit <= 0:
+            return {"error": "apply_deposit_limit needs a positive weekly_deposit_limit"}
+        params = {"limit": float(weekly_deposit_limit)}
+    return {"proposal": {"player_id": player_id, "action": action, "params": params, "reason": reason},
+            "status": "waiting for human approval. Tell the user it is proposed, not done."}
+
+
 # --- RAG over policies.md: one chunk per "## " section ------------------------
 def embed(texts):
     return post("/api/embed", {"model": EMBED_MODEL, "input": texts})["embeddings"]
@@ -106,7 +208,8 @@ def search_policy(query: str, k: int = 2) -> list[str]:
 
 
 TOOLS = {"get_player": get_player, "get_transactions": get_transactions,
-         "get_betting_summary": get_betting_summary, "search_policy": search_policy}
+         "get_betting_summary": get_betting_summary, "get_rg_signals": get_rg_signals,
+         "top_risk_players": top_risk_players, "search_policy": search_policy, "propose_action": propose_action}
 
 # The LLM never sees the Python code above, only these descriptions (JSON Schema).
 # The description is how it decides WHEN to call a tool, so write it for the model.
@@ -122,7 +225,7 @@ TOOL_SPECS = [
          PLAYER_ID, ["player_id"]),
     spec("get_transactions", "List a player's deposits, withdrawals and bonuses, newest first, "
          "including decline reasons for declined ones.",
-         PLAYER_ID | {"status": {"type": "string", "enum": ["completed", "pending", "declined"],
+         PLAYER_ID | {"status": {"type": "string", "enum": ["completed", "pending", "declined", "cancelled"],
                                  "description": "Only return transactions with this status."}},
          ["player_id"]),
     spec("get_betting_summary", "Betting totals for a player over the last N days: number of bets, "
@@ -130,14 +233,30 @@ TOOL_SPECS = [
          "and how much was wagered since the player's last bonus.",
          PLAYER_ID | {"days": {"type": "integer", "description": "Look-back window, default 30."}},
          ["player_id"]),
+    spec("get_rg_signals", "Responsible gambling risk signals for one player over the last N days: deposits "
+         "vs the usual amount, share of night play, loss chasing (stake after a loss vs after a win), longest "
+         "session, cancelled withdrawals that were gambled, deposit limit hits, and a 0-100 risk score with reasons.",
+         PLAYER_ID | {"days": {"type": "integer", "description": "Look-back window, default 7."}}, ["player_id"]),
+    spec("top_risk_players", "Rank all players by responsible gambling risk score over the last N days. "
+         "Use it for questions like 'which players are most at risk this week'.",
+         {"days": {"type": "integer", "description": "Look-back window, default 7."},
+          "limit": {"type": "integer", "description": "How many players, default 10."}}, []),
     spec("search_policy", "Search the platform's policies (KYC, bonus wagering, responsible gambling, "
          "deposit limits, self-exclusion, withdrawals). Use it to explain a decline reason or decide what to do.",
          {"query": {"type": "string"}}, ["query"]),
+    spec("propose_action", "Propose an action on a player's account. It is NOT carried out: a person must "
+         "approve it first. Actions: " + "; ".join(f"{k}: {v}" for k, v in ACTIONS.items()) + ".",
+         PLAYER_ID | {"action": {"type": "string", "enum": list(ACTIONS)},
+                      "reason": {"type": "string", "description": "Why, citing the data and the policy."},
+                      "weekly_deposit_limit": {"type": "number", "description": "Only for apply_deposit_limit."}},
+         ["player_id", "action", "reason"]),
 ]
 
 SYSTEM = (f"You are an operations assistant for an online casino platform. Today is {TODAY}. "
           "Use the tools to look up facts and never guess numbers or reasons. "
           "Always check the relevant policy with search_policy before recommending an action. "
+          "You cannot change any data. When the policy calls for an action, propose it with propose_action; "
+          "a person approves it, so say it is proposed, not done. "
           "Answer briefly, and mention the data you based the answer on.")
 
 
@@ -178,6 +297,8 @@ def run_agent(question, max_steps=8, verbose=True):
             name, args = call["function"]["name"], call["function"]["arguments"]
             result = call_tool(name, args)
             trace.append({"tool": name, "args": args})
+            if name == "propose_action" and "proposal" in result:
+                trace[-1]["proposal"] = result["proposal"]
             if verbose:
                 print(f"  -> {name}({args})", file=sys.stderr)
             messages.append({"role": "tool", "tool_name": name, "content": json.dumps(result, default=str)})
@@ -209,7 +330,9 @@ def to_report(question, answer) -> Report:
 
 def investigate(question) -> dict:
     answer, trace = run_agent(question)
-    return {"answer": answer, "report": to_report(question, answer).model_dump(), "tool_calls": trace}
+    proposals = {(p["player_id"], p["action"]): p for t in trace if (p := t.pop("proposal", None))}  # dedupe repeats
+    return {"answer": answer, "report": to_report(question, answer).model_dump(), "tool_calls": trace,
+            "proposals": list(proposals.values())}
 
 
 if __name__ == "__main__":

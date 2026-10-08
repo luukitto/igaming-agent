@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iGaming Ops Agent</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6eb;
+          --accent: #4f46e5; --warn: #b91c1c; --ok: #15803d; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111318; --card: #1a1d24; --text: #e6e8ec; --muted: #9aa1ad; --line: #2b2f38;
+            --accent: #818cf8; --warn: #f87171; --ok: #4ade80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  form { display: flex; gap: 8px; }
+  input { flex: 1; min-width: 0; padding: 10px 12px; font: inherit; color: inherit; background: var(--card);
+          border: 1px solid var(--line); border-radius: 8px; }
+  button { padding: 10px 16px; font: inherit; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--card); color: inherit; cursor: pointer; }
+  button[type=submit] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .examples { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 24px; }
+  .examples button { padding: 4px 10px; font-size: 13px; border-radius: 999px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .answer { white-space: pre-wrap; margin: 0; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; }
+  ul { margin: 0; padding-left: 18px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; border: 1px solid currentColor; }
+  .yes { color: var(--warn); } .no { color: var(--ok); }
+  code { font-size: 13px; }
+  .status { color: var(--muted); }
+  .error { color: var(--warn); }
+  .log { list-style: none; padding: 0; }
+  .log li { padding: 10px 0; border-top: 1px solid var(--line); }
+  .log li:first-child { border-top: 0; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+  .row button { padding: 4px 12px; font-size: 13px; }
+  .approve { color: var(--ok); } .reject { color: var(--warn); }
+  label input { width: 160px; flex: none; padding: 4px 8px; font-size: 13px; }
+  @media (max-width: 520px) { dl { grid-template-columns: 1fr; } dt { margin-top: 6px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>🎰 iGaming Ops Agent</h1>
+  <p class="sub">Ask about a player. The agent looks up the data, checks the policy and writes a report.</p>
+
+  <form id="form">
+    <input id="q" required minlength="3" maxlength="500" placeholder="Why was player 1042's withdrawal declined?">
+    <button type="submit" id="go">Investigate</button>
+  </form>
+  <div class="examples">
+    <button type="button">Why was player 1042's withdrawal declined?</button>
+    <button type="button">Why was player 1077's withdrawal declined?</button>
+    <button type="button">Is there anything concerning about player 1100?</button>
+    <button type="button">Player 1150 wants to deposit again. What should we do?</button>
+    <button type="button">Which players are most at risk this week?</button>
+  </div>
+
+  <p id="status" class="status" hidden></p>
+  <div id="result" hidden>
+    <div class="card"><h2>Answer</h2><p id="answer" class="answer"></p></div>
+    <div class="card"><h2>Report</h2><dl id="report"></dl></div>
+    <div class="card"><h2>Tool calls</h2><ul id="tools"></ul></div>
+  </div>
+
+  <div class="card">
+    <h2>Approvals &amp; audit log</h2>
+    <p class="meta">The agent can only propose actions. Nothing changes until a person approves, and every decision is logged.</p>
+    <label class="meta">Your name <input id="approver" maxlength="100" placeholder="e.g. j.smith"></label>
+    <ul id="log" class="log"></ul>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const el = (tag, text, cls) => Object.assign(document.createElement(tag), { textContent: text, className: cls || "" });
+
+document.querySelectorAll(".examples button").forEach(b => b.onclick = () => { $("q").value = b.textContent; $("form").requestSubmit(); });
+
+$("form").onsubmit = async e => {
+  e.preventDefault();
+  $("go").disabled = true; $("result").hidden = true;
+  $("status").hidden = false; $("status").className = "status";
+  const start = Date.now();
+  const tick = setInterval(() => $("status").textContent = `Investigating… ${Math.round((Date.now() - start) / 1000)}s (slow on CPU)`, 1000);
+  $("status").textContent = "Investigating…";
+  try {
+    const r = await fetch("/investigate", { method: "POST", headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ question: $("q").value }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail));
+    render(data);
+    loadLog();
+    $("status").hidden = true;
+  } catch (err) {
+    $("status").className = "status error"; $("status").textContent = "Error: " + err.message;
+  } finally {
+    clearInterval(tick); $("go").disabled = false;
+  }
+};
+
+function render({ answer, report, tool_calls }) {
+  $("answer").textContent = answer;
+  const dl = $("report"); dl.replaceChildren();
+  const row = (k, v) => { dl.append(el("dt", k)); const dd = el("dd"); dd.append(v); dl.append(dd); };
+  row("Player", String(report.player_id ?? "—"));
+  row("Category", el("code", report.category));
+  row("Root cause", report.root_cause);
+  const ev = el("ul"); report.evidence.forEach(x => ev.append(el("li", x))); row("Evidence", ev);
+  row("Action", report.recommended_action);
+  const esc = report.escalate_to_responsible_gambling;
+  row("Escalate to RG", el("span", esc ? "Yes" : "No", "badge " + (esc ? "yes" : "no")));
+  $("tools").replaceChildren(...tool_calls.map(t => el("li", `${t.tool}(${JSON.stringify(t.args)})`)));
+  $("result").hidden = false;
+}
+
+// Approver name: remembered per browser only as a convenience; the server logs whatever is sent.
+try { $("approver").value = localStorage.getItem("approver") || ""; } catch {}
+$("approver").onchange = () => { try { localStorage.setItem("approver", $("approver").value.trim()); } catch {} };
+
+async function loadLog() {
+  const r = await fetch("/actions");
+  if (r.ok) $("log").replaceChildren(...(await r.json()).map(logItem));
+  if (!$("log").children.length) $("log").append(el("li", "No actions proposed yet.", "meta"));
+}
+
+function logItem(a) {
+  const li = el("li");
+  const limit = a.params.limit ? ` (weekly limit ${a.params.limit})` : "";
+  const head = el("div"); head.append(el("code", a.action), ` · player ${a.player_id}${limit}`);
+  li.append(head, el("div", a.reason),
+            el("div", `#${a.id} proposed by ${a.proposed_by} at ${a.proposed_at} UTC`, "meta"));
+  const row = el("div", "", "row");
+  if (a.status === "pending") {
+    for (const [label, approve] of [["Approve", true], ["Reject", false]]) {
+      const b = el("button", label, approve ? "approve" : "reject");
+      b.onclick = () => decide(a.id, approve, row);
+      row.append(b);
+    }
+  } else {
+    row.append(el("span", a.status, "badge " + (a.status === "approved" ? "no" : "yes")),
+               el("span", `by ${a.decided_by} at ${a.decided_at} UTC`, "meta"));
+  }
+  li.append(row);
+  return li;
+}
+
+async function decide(id, approve, row) {
+  const by = $("approver").value.trim();
+  if (by.length < 2) { $("approver").focus(); $("approver").reportValidity?.(); alert("Enter your name first: it goes in the audit log."); return; }
+  row.querySelectorAll("button").forEach(b => b.disabled = true);
+  const r = await fetch(`/actions/${id}/decision`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                    body: JSON.stringify({ approve, by }) });
+  if (!r.ok) alert((await r.json()).detail);
+  loadLog();
+}
+
+loadLog();
+</script>
+</body>
+</html>

@@ -4,11 +4,14 @@ Slow on CPU (a few minutes per case), because every case runs the real LLM.
 
 Run:  python eval.py            (MODEL=llama3.1:8b python eval.py to compare models)
 """
+import functools
 import json
 import time
 from pathlib import Path
 
 from agent import MODEL, investigate
+
+print = functools.partial(print, flush=True)  # show results live even when output goes to a file
 
 cases = json.loads((Path(__file__).parent / "eval_cases.json").read_text())
 rows, start = [], time.time()
