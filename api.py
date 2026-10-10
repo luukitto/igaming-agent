@@ -84,7 +84,7 @@ def ui():
 
 @app.get("/favicon.ico", include_in_schema=False)  # browsers ask for this path on their own
 def favicon():
-    return FileResponse(Path(__file__).parent / "favicon.png")
+    return FileResponse(Path(__file__).parent / "favicon.ico")
 
 
 @app.get("/health")

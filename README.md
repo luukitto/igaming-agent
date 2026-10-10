@@ -165,7 +165,7 @@ The eval found real bugs on the way there: the agent never proposed any action, 
 | `actions.py` | Saves proposals, approve / reject, applies approved actions (the only writer) |
 | `api.py` | FastAPI: `GET /` (UI), `POST /investigate`, `GET /actions`, `POST /actions/{id}/decision`, `GET /health` |
 | `index.html` | Single-page UI for support staff: plain-language answer, RG warning, approvals, decision history, glossary |
-| `favicon.png` | Slot machine icon from [Twemoji](https://github.com/jdecked/twemoji), CC-BY 4.0 |
+| `favicon.ico` | Slot machine icon from [Twemoji](https://github.com/jdecked/twemoji), CC-BY 4.0 |
 | `seed.py` | Builds the fake casino DB with the planted cases |
 | `policies.md` | Fictional platform policies (KYC, bonus wagering, RG, limits, self-exclusion) |
 | `test_tools.py` | Fast offline tests |
