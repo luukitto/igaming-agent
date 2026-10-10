@@ -16,7 +16,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
 import actions
-from agent import MODEL, Report, investigate
+from agent import DB, MODEL, TODAY, Report, investigate, top_risk_players
 
 app = FastAPI(title="iGaming Ops Agent")
 
@@ -75,6 +75,32 @@ def post_decision(action_id: int, d: Decision, by: str = Depends(approver)):
         return actions.decide(action_id, d.approve, by)
     except LookupError as e:
         raise HTTPException(409, str(e))
+
+
+@app.get("/stats")
+def stats():
+    """Numbers for the team dashboard. Plain SQL, no LLM, so it loads instantly."""
+    one = lambda sql: dict(DB.execute(sql, {"today": TODAY}).fetchone())
+    rows = lambda sql: [dict(r) for r in DB.execute(sql, {"today": TODAY})]
+    week = "created_at >= date(:today, '-7 days')"
+    return {
+        "as_of": TODAY,
+        "cases": one("SELECT COUNT(*) total, SUM(status = 'pending') pending, SUM(status = 'approved') approved, "
+                     "SUM(status = 'rejected') rejected, MIN(CASE WHEN status = 'pending' THEN proposed_at END) oldest_pending "
+                     "FROM actions"),
+        "pending_by_action": rows("SELECT action, COUNT(*) n FROM actions WHERE status = 'pending' GROUP BY action ORDER BY n DESC"),
+        "players": one("SELECT COUNT(*) total, SUM(kyc_status != 'verified') kyc_unfinished, "
+                       "SUM(account_status = 'self_excluded') self_excluded, SUM(account_status = 'blocked') blocked FROM players"),
+        "withdrawals": rows(f"SELECT status, COUNT(*) n FROM transactions WHERE type = 'withdrawal' AND {week} GROUP BY status ORDER BY n DESC"),
+        "declines": rows(f"SELECT decline_reason reason, COUNT(*) n FROM transactions WHERE status = 'declined' AND {week} "
+                         "GROUP BY reason ORDER BY n DESC"),
+        "at_risk": top_risk_players(7, 8),
+    }
+
+
+@app.get("/dashboard", include_in_schema=False)
+def dashboard():
+    return FileResponse(Path(__file__).parent / "dashboard.html")
 
 
 @app.get("/", include_in_schema=False)

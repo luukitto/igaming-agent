@@ -15,6 +15,8 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 system-ui, sans-serif; }
   main { max-width: 720px; margin: 0 auto; padding: 28px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+  a { color: var(--accent); }
   h1 { font-size: 20px; margin: 0; display: flex; align-items: center; gap: 10px; }
   h2 { font-size: 16px; margin: 0 0 8px; }
   p { margin: 0; }
@@ -82,7 +84,10 @@
 </head>
 <body>
 <main>
-  <h1><img src="/favicon.ico?v=2" alt="" width="26" height="26"> Player Support Assistant</h1>
+  <header>
+    <h1><img src="/favicon.ico?v=2" alt="" width="26" height="26"> Player Support Assistant</h1>
+    <a href="/dashboard">Team overview</a>
+  </header>
   <p class="sub" id="sub">Ask about a player and get what happened and what to do.</p>
 
   <form id="form">
@@ -301,6 +306,9 @@ async function decide(id, approve, row) {
 }
 
 loadLog();
+// The dashboard's "Check player" links open this page with the question filled in
+const asked = new URLSearchParams(location.search).get("q");
+if (asked) { $("q").value = asked; history.replaceState(null, "", "/"); $("form").requestSubmit(); }
 </script>
 </body>
 </html>

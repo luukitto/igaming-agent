@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team overview · Player Support Assistant</title>
+<link rel="icon" href="/favicon.ico?v=2" sizes="any">
+<style>
+  /* Same tokens as index.html */
+  :root { --paper: #f6f7f5; --surface: #fff; --ink: #17201b; --muted: #5d6862; --line: #dde2de; --track: #e4ebe7;
+          --accent: #13684d; --warn: #b42318; --warn-track: #f6dcd8; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #101412; --surface: #171c19; --ink: #e7ece9; --muted: #9aa59f; --line: #2a322e; --track: #213029;
+            --accent: #4fbf93; --warn: #f5877b; --warn-track: #3a1f1c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 system-ui, sans-serif; }
+  main { max-width: 880px; margin: 0 auto; padding: 28px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+  h1 { font-size: 20px; margin: 0; display: flex; align-items: center; gap: 10px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sub, .meta { color: var(--muted); }
+  .sub { margin: 4px 0 28px; }
+  .meta { font-size: 13px; }
+  section { border-top: 1px solid var(--line); padding: 20px 0 8px; }
+
+  .term { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; position: relative; }
+  .term:hover::after, .term:focus::after {
+    content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); z-index: 10;
+    width: max-content; max-width: min(280px, 80vw); padding: 8px 10px; border-radius: 6px;
+    background: var(--ink); color: var(--paper); font-size: 13px; font-weight: 400; line-height: 1.45; pointer-events: none; }
+
+  /* The one number a manager acts on: how much is waiting for a supervisor. */
+  .hero { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: flex-end; padding-bottom: 24px; }
+  .hero .n { font-size: 64px; font-weight: 600; line-height: 1; }
+  .hero .n.hot { color: var(--warn); }
+  .hero .label { font-size: 17px; font-weight: 600; margin-top: 6px; }
+  .hero ul { list-style: none; padding: 0; margin: 0 0 4px; font-size: 14px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 20px; padding-bottom: 20px; }
+  .tile .v { font-size: 26px; font-weight: 600; line-height: 1.2; }
+  .tile .l { font-size: 13px; color: var(--muted); }
+
+  .risk { list-style: none; padding: 0; margin: 0; }
+  .risk li { display: grid; grid-template-columns: max-content minmax(80px, 160px) 1fr auto; gap: 4px 14px; align-items: center;
+             padding: 10px 0; border-top: 1px solid var(--line); }
+  .risk li:first-child { border-top: 0; }
+  .meter { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+  .meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+  .meter.hot { background: var(--warn-track); } .meter.hot i { background: var(--warn); }
+  .score { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 6px; }
+  .risk .why { font-size: 13px; color: var(--muted); }
+  @media (max-width: 600px) {
+    .risk li { grid-template-columns: max-content 1fr; }
+    .risk .why, .risk a { grid-column: 1 / -1; }
+  }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  @media (max-width: 600px) { .cols { grid-template-columns: 1fr; } }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td { padding: 6px 0; border-top: 1px solid var(--line); }
+  tr:first-child td { border-top: 0; }
+  td.num { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .error { color: var(--warn); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1><img src="/favicon.ico?v=2" alt="" width="26" height="26"> Team overview</h1>
+    <a href="/">Ask the assistant</a>
+  </header>
+  <p class="sub" id="sub">Loading…</p>
+
+  <div class="hero">
+    <div>
+      <div class="n" id="pending">–</div>
+      <div class="label">waiting for approval</div>
+    </div>
+    <div>
+      <ul id="pending-by"></ul>
+      <p class="meta" id="oldest"></p>
+    </div>
+    <a href="/#queue" id="review">Review them</a>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section>
+    <h2>Players to watch this week <span class="meta">(<span class="term" tabindex="0" data-tip="0 to 100. Adds up warning signs: deposits far above usual, late-night play, chasing losses, cancelled withdrawals, very long sessions, hitting a deposit limit. 50+ is shown in red." aria-description="0 to 100. Adds up warning signs: deposits far above usual, late-night play, chasing losses, cancelled withdrawals, very long sessions, hitting a deposit limit. 50+ is shown in red.">risk score</span>)</span></h2>
+    <ul class="risk" id="risk"></ul>
+  </section>
+
+  <section class="cols">
+    <div>
+      <h2>Withdrawals, last 7 days</h2>
+      <table><tbody id="withdrawals"></tbody></table>
+    </div>
+    <div>
+      <h2>Why money was declined</h2>
+      <table><tbody id="declines"></tbody></table>
+    </div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const el = (tag, text, cls) => Object.assign(document.createElement(tag), { textContent: text ?? "", className: cls || "" });
+function term(text, tip) {
+  const s = el("span", text, "term");
+  s.tabIndex = 0; s.dataset.tip = tip; s.setAttribute("aria-description", tip);
+  return s;
+}
+const row = (label, n) => { const tr = el("tr"); tr.append(el("td"), el("td", n, "num")); tr.firstChild.append(label); return tr; };
+const empty = text => { const tr = el("tr"); tr.append(el("td", text, "meta")); return tr; };
+
+const ACTIONS = { request_kyc_documents: "Ask for ID documents", flag_for_rg_review: "Send to Responsible Gambling team",
+                  apply_deposit_limit: "Lower the weekly deposit limit", block_account: "Block account" };
+const DECLINES = {
+  kyc_not_verified: ["ID check not finished", "The player hasn't uploaded a government ID and proof of address yet."],
+  wagering_requirement_not_met: ["Bonus wagering not met", "The player hasn't bet the amount their bonus requires before withdrawing."],
+  self_exclusion_active: ["Player is self-excluded", "The player asked us to stop them gambling for a while."],
+  deposit_limit_reached: ["Deposit limit reached", "The player hit the most they can deposit this week."],
+};
+const WITHDRAWALS = { completed: "Paid out", declined: "Declined", cancelled: "Cancelled by the player", pending: "Still processing" };
+
+function ago(t) {
+  const min = Math.round((Date.now() - new Date(t.replace(" ", "T") + "Z")) / 60000);  // the DB stores UTC
+  return min < 60 ? `${min} min` : min < 1440 ? `${Math.round(min / 60)} h` : `${Math.round(min / 1440)} days`;
+}
+
+async function load() {
+  const r = await fetch("/stats");
+  if (!r.ok) { $("sub").className = "sub error"; $("sub").textContent = "Couldn't load the numbers. Refresh to try again."; return; }
+  const s = await r.json();
+  $("sub").className = "sub";
+  $("sub").textContent = `Player activity up to ${new Date(s.as_of).toLocaleDateString(undefined, { dateStyle: "long" })}. Updates every 30 seconds.`;
+
+  const pending = s.cases.pending || 0;
+  $("pending").textContent = pending;
+  $("pending").classList.toggle("hot", pending > 0);
+  $("review").hidden = !pending;
+  $("pending-by").replaceChildren(...s.pending_by_action.map(a => el("li", `${a.n} × ${ACTIONS[a.action] || a.action}`)));
+  $("oldest").textContent = s.cases.oldest_pending ? `Oldest has waited ${ago(s.cases.oldest_pending)}` : "Nothing waiting. All clear.";
+
+  const tile = (v, label, tip) => {
+    const d = el("div", "", "tile");
+    const l = el("div", "", "l"); l.append(tip ? term(label, tip) : label);
+    d.append(el("div", (v || 0).toLocaleString(), "v"), l);
+    return d;
+  };
+  $("tiles").replaceChildren(
+    tile(s.cases.approved, "Approved actions"),
+    tile(s.cases.rejected, "Rejected actions"),
+    tile(s.players.kyc_unfinished, "ID check not finished", "Players who can't withdraw until they upload a government ID and proof of address."),
+    tile(s.players.self_excluded, "Self-excluded", "Players who asked us to stop them gambling for a while. They can't deposit or play."),
+    tile(s.players.blocked, "Blocked accounts", "Can't log in or play. Used for fraud or abuse."),
+  );
+
+  $("risk").replaceChildren(...s.at_risk.map(p => {
+    const li = el("li"), hot = p.risk_score >= 50;
+    const meter = el("div", "", "meter" + (hot ? " hot" : ""));
+    meter.append(Object.assign(el("i"), { style: `width:${p.risk_score}%` }));
+    meter.setAttribute("role", "img"); meter.setAttribute("aria-label", `Risk score ${p.risk_score} of 100`);
+    const score = el("div"); score.append(el("strong", `Player ${p.player_id}`), el("span", p.risk_score, "score"));
+    const check = Object.assign(el("a", "Check player"), {
+      href: "/?q=" + encodeURIComponent(`Is there anything concerning about player ${p.player_id}'s recent activity?`) });
+    li.append(score, meter, el("div", p.reasons.join("; "), "why"), check);
+    return li;
+  }));
+  if (!s.at_risk.length) $("risk").append(el("li", "No warning signs this week.", "meta"));
+
+  $("withdrawals").replaceChildren(...s.withdrawals.map(w => row(WITHDRAWALS[w.status] || w.status, w.n)));
+  if (!s.withdrawals.length) $("withdrawals").append(empty("No withdrawals this week."));
+  $("declines").replaceChildren(...s.declines.map(d => {
+    const [label, tip] = DECLINES[d.reason] || [d.reason || "No reason given", null];
+    return row(tip ? term(label, tip) : label, d.n);
+  }));
+  if (!s.declines.length) $("declines").append(empty("Nothing declined this week."));
+}
+
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>
