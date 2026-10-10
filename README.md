@@ -1,5 +1,7 @@
 # 🎰 iGaming Ops Agent
 
+**Live demo: [igaming-agent-production-cd4f.up.railway.app](https://igaming-agent-production-cd4f.up.railway.app)** (API docs at [/docs](https://igaming-agent-production-cd4f.up.railway.app/docs)). Ask it anything; approving actions needs an approver login.
+
 An LLM agent that investigates player issues on a (fake) online casino platform, the kind of question a support or risk team asks all day:
 
 > *"Why was player 1042's withdrawal declined?"*
