@@ -3,105 +3,202 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Team overview · Player Support Assistant</title>
+<title>Casino overview · Player Support Assistant</title>
 <link rel="icon" href="/favicon.ico?v=2" sizes="any">
 <style>
   /* Same tokens as index.html */
   :root { --paper: #f6f7f5; --surface: #fff; --ink: #17201b; --muted: #5d6862; --line: #dde2de; --track: #e4ebe7;
-          --accent: #13684d; --warn: #b42318; --warn-track: #f6dcd8; color-scheme: light dark; }
+          --accent: #13684d; --on-accent: #fff; --warn: #b42318; --warn-track: #f6dcd8; --grid: #e9ece9;
+          color-scheme: light dark; }
   @media (prefers-color-scheme: dark) {
     :root { --paper: #101412; --surface: #171c19; --ink: #e7ece9; --muted: #9aa59f; --line: #2a322e; --track: #213029;
-            --accent: #4fbf93; --warn: #f5877b; --warn-track: #3a1f1c; }
+            --accent: #4fbf93; --on-accent: #0c1f17; --warn: #f5877b; --warn-track: #3a1f1c; --grid: #222a26; }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 system-ui, sans-serif; }
-  main { max-width: 880px; margin: 0 auto; padding: 28px 16px 64px; }
-  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 0 20px 64px; }
   h1 { font-size: 20px; margin: 0; display: flex; align-items: center; gap: 10px; }
-  h2 { font-size: 16px; margin: 0 0 12px; }
+  h2 { font-size: 16px; margin: 0; }
   p { margin: 0; }
   a { color: var(--accent); }
+  button, select, input { font: inherit; color: inherit; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .sub, .meta { color: var(--muted); }
-  .sub { margin: 4px 0 28px; }
-  .meta { font-size: 13px; }
-  section { border-top: 1px solid var(--line); padding: 20px 0 8px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .neg { color: var(--warn); }
+
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 24px 0 16px; }
+
+  /* Filters stay reachable while scrolling the player table */
+  .filters { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+             padding: 10px 0; background: var(--paper); border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .seg button { border: 0; background: none; padding: 6px 14px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+  select, input[type=search] { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .filters .asof { margin-left: auto; }
 
   .term { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; position: relative; }
   .term:hover::after, .term:focus::after {
-    content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); z-index: 10;
-    width: max-content; max-width: min(280px, 80vw); padding: 8px 10px; border-radius: 6px;
-    background: var(--ink); color: var(--paper); font-size: 13px; font-weight: 400; line-height: 1.45; pointer-events: none; }
+    content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); z-index: 30;
+    width: max-content; max-width: min(280px, 80vw); padding: 8px 10px; border-radius: 6px; text-align: left;
+    background: var(--ink); color: var(--paper); font-size: 13px; font-weight: 400; line-height: 1.45;
+    white-space: normal; pointer-events: none; }
+  th .term:hover::after, th .term:focus::after, td.num .term:hover::after, td.num .term:focus::after { left: auto; right: 0; }
 
-  /* The one number a manager acts on: how much is waiting for a supervisor. */
-  .hero { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: flex-end; padding-bottom: 24px; }
-  .hero .n { font-size: 64px; font-weight: 600; line-height: 1; }
-  .hero .n.hot { color: var(--warn); }
-  .hero .label { font-size: 17px; font-weight: 600; margin-top: 6px; }
-  .hero ul { list-style: none; padding: 0; margin: 0 0 4px; font-size: 14px; }
+  /* Revenue: the number an owner opens this page for, beside its daily shape */
+  .hero { display: grid; grid-template-columns: minmax(220px, 280px) 1fr; gap: 24px 40px; align-items: start; padding-bottom: 28px; }
+  .hero .big { font-size: 52px; font-weight: 600; line-height: 1.05; margin: 6px 0 8px; }
+  .delta { display: block; font-size: 13px; font-weight: 600; }
+  .delta.up { color: var(--accent); } .delta.down { color: var(--warn); } .delta.flat { color: var(--muted); font-weight: 400; }
+  .chart { position: relative; min-height: 200px; }
+  .chart svg { display: block; width: 100%; height: 200px; overflow: visible; }
+  .chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--paper); border-radius: 6px;
+         padding: 8px 10px; font-size: 12px; line-height: 1.5; white-space: nowrap; z-index: 10; }
+  .tip b { display: block; font-size: 13px; }
+  .chart details { margin-top: 6px; }
+  .chart details table { margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 20px; padding-bottom: 20px; }
-  .tile .v { font-size: 26px; font-weight: 600; line-height: 1.2; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; background: var(--surface);
+           border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 32px; }
+  .tile { padding: 14px 16px; outline: 1px solid var(--line); }  /* outlines fill the 1px gaps, so an uneven last row has no grey hole */
+  .tile .v { font-size: 24px; font-weight: 600; line-height: 1.25; margin: 2px 0; }
   .tile .l { font-size: 13px; color: var(--muted); }
 
-  .risk { list-style: none; padding: 0; margin: 0; }
-  .risk li { display: grid; grid-template-columns: max-content minmax(80px, 160px) 1fr auto; gap: 4px 14px; align-items: center;
-             padding: 10px 0; border-top: 1px solid var(--line); }
-  .risk li:first-child { border-top: 0; }
-  .meter { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
-  .meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
-  .meter.hot { background: var(--warn-track); } .meter.hot i { background: var(--warn); }
-  .score { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 6px; }
-  .risk .why { font-size: 13px; color: var(--muted); }
-  @media (max-width: 600px) {
-    .risk li { grid-template-columns: max-content 1fr; }
-    .risk .why, .risk a { grid-column: 1 / -1; }
-  }
+  .split { display: grid; grid-template-columns: minmax(280px, 1fr) 2fr; gap: 32px; margin-bottom: 36px; }
+  .hero > *, .split > * { min-width: 0; }  /* let wide tables scroll inside their box instead of widening the page */
+  .head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
 
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
-  @media (max-width: 600px) { .cols { grid-template-columns: 1fr; } }
-  table { border-collapse: collapse; width: 100%; font-size: 14px; }
-  td { padding: 6px 0; border-top: 1px solid var(--line); }
-  tr:first-child td { border-top: 0; }
-  td.num { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .attn { list-style: none; padding: 0; margin: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .attn > li + li { border-top: 1px solid var(--line); }
+  .attn .item { display: grid; grid-template-columns: 52px 1fr; gap: 0 12px; align-items: center; width: 100%; padding: 10px 14px;
+                text-align: left; background: none; border: 0; color: inherit; text-decoration: none; }
+  .attn a.item, .attn button.item { cursor: pointer; }
+  .attn a.item:hover, .attn button.item:hover { background: var(--paper); }
+  .attn .n { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .attn .n.hot { color: var(--warn); }
+  .attn .what { font-weight: 600; }
+  .attn .how { font-size: 12px; color: var(--muted); }
+  .attn ul { margin: 2px 0 0; padding-left: 16px; font-size: 12px; color: var(--muted); }
+
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: 0; }
+  th { font-weight: 600; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  th.num { text-align: right; }
+  th button { background: none; border: 0; padding: 0; cursor: pointer; font-weight: inherit; color: inherit; }
+  th[aria-sort] button { color: var(--ink); }
+  th[aria-sort=ascending] button::after { content: " ▲"; font-size: 9px; }
+  th[aria-sort=descending] button::after { content: " ▼"; font-size: 9px; }
+  tbody tr:hover { background: var(--paper); }
+  .bar { display: inline-block; vertical-align: middle; height: 6px; border-radius: 3px; background: var(--accent); margin-right: 8px; }
+  .bar.neg { background: var(--warn); }
+  .pill { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; border: 1px solid currentColor; white-space: nowrap; }
+  .pill.ok { color: var(--accent); } .pill.bad { color: var(--warn); } .pill.wait { color: var(--muted); }
+  .who b { display: block; font-weight: 600; }
+  .meter { display: inline-block; vertical-align: middle; width: 54px; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; margin-right: 6px; }
+  .meter i { display: block; height: 100%; background: var(--accent); }
+  .meter.hot { background: var(--warn-track); } .meter.hot i { background: var(--warn); }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin-bottom: 10px; }
+  .toolbar input[type=search] { min-width: 200px; flex: 1 1 200px; max-width: 300px; }
+  .toolbar label { display: inline-flex; gap: 6px; align-items: center; }
+  .toolbar .right { margin-left: auto; display: flex; gap: 8px; }
+  .btn { padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; }
+  .empty { padding: 28px 12px; text-align: center; color: var(--muted); }
   .error { color: var(--warn); }
+
+  @media (max-width: 860px) {
+    .hero, .split { grid-template-columns: 1fr; }
+    .filters .asof { margin-left: 0; width: 100%; }
+    .toolbar .right { margin-left: 0; }
+  }
 </style>
 </head>
 <body>
 <main>
   <header>
-    <h1><img src="/favicon.ico?v=2" alt="" width="26" height="26"> Team overview</h1>
+    <h1><img src="/favicon.ico?v=2" alt="" width="26" height="26"> Casino overview</h1>
     <a href="/">Ask the assistant</a>
   </header>
-  <p class="sub" id="sub">Loading…</p>
+
+  <div class="filters" role="group" aria-label="Filters">
+    <div class="seg" id="period">
+      <button type="button" data-days="7">7 days</button>
+      <button type="button" data-days="30">30 days</button>
+      <button type="button" data-days="90">90 days</button>
+    </div>
+    <select id="country" aria-label="Country"><option value="">All countries</option></select>
+    <span class="asof muted small" id="asof">Loading…</span>
+  </div>
 
   <div class="hero">
     <div>
-      <div class="n" id="pending">–</div>
-      <div class="label">waiting for approval</div>
+      <span class="muted"><span class="term" tabindex="0" data-tip="Gross gaming revenue: what players bet minus what they won back. The casino's take before costs.">Revenue (GGR)</span></span>
+      <div class="big" id="ggr">–</div>
+      <div id="ggr-delta"></div>
+      <p class="muted small" id="hold" style="margin-top:6px"></p>
     </div>
-    <div>
-      <ul id="pending-by"></ul>
-      <p class="meta" id="oldest"></p>
-    </div>
-    <a href="/#queue" id="review">Review them</a>
+    <div class="chart" id="chart" role="img" aria-label="Revenue per day"></div>
   </div>
 
   <div class="tiles" id="tiles"></div>
 
-  <section>
-    <h2>Players to watch this week <span class="meta">(<span class="term" tabindex="0" data-tip="0 to 100. Adds up warning signs: deposits far above usual, late-night play, chasing losses, cancelled withdrawals, very long sessions, hitting a deposit limit. 50+ is shown in red." aria-description="0 to 100. Adds up warning signs: deposits far above usual, late-night play, chasing losses, cancelled withdrawals, very long sessions, hitting a deposit limit. 50+ is shown in red.">risk score</span>)</span></h2>
-    <ul class="risk" id="risk"></ul>
-  </section>
-
-  <section class="cols">
+  <div class="split">
     <div>
-      <h2>Withdrawals, last 7 days</h2>
-      <table><tbody id="withdrawals"></tbody></table>
+      <div class="head"><h2>Needs attention</h2><span class="muted small">Click to see the players</span></div>
+      <ul class="attn" id="attn"></ul>
     </div>
     <div>
-      <h2>Why money was declined</h2>
-      <table><tbody id="declines"></tbody></table>
+      <div class="head"><h2>Games</h2><span class="muted small" id="games-note"></span></div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Game</th><th>Provider</th><th class="num">Players</th><th class="num">Bets placed</th>
+            <th class="num"><span class="term" tabindex="0" data-tip="What players bet on this game minus what they won back.">Revenue</span></th>
+            <th class="num"><span class="term" tabindex="0" data-tip="Share of bets the casino kept, next to what the game is built to keep (100% minus its RTP). Over a short period, a big gap is normal luck.">Kept / expected</span></th></tr></thead>
+          <tbody id="games"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <section id="players-section">
+    <div class="head"><h2>Players <span class="muted" id="pcount"></span></h2>
+      <span class="muted small">Money columns cover the chosen period</span></div>
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Search name or player number" aria-label="Search players">
+      <select id="f-kyc" aria-label="ID check">
+        <option value="">Any ID check</option><option value="verified">ID verified</option>
+        <option value="unfinished">ID not finished</option><option value="pending">ID pending</option><option value="rejected">ID rejected</option>
+      </select>
+      <select id="f-status" aria-label="Account">
+        <option value="">Any account</option><option value="active">Active</option>
+        <option value="self_excluded">Self-excluded</option><option value="blocked">Blocked</option>
+      </select>
+      <label><input type="checkbox" id="f-risk"> Warning signs only</label>
+      <label><input type="checkbox" id="f-active"> Played in period</label>
+      <div class="right">
+        <button type="button" class="btn" id="clear" hidden>Clear filters</button>
+        <button type="button" class="btn" id="csv">Export CSV</button>
+      </div>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr id="phead"></tr></thead>
+        <tbody id="players"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <span class="muted small" id="range"></span>
+      <button type="button" class="btn" id="prev">Previous</button>
+      <button type="button" class="btn" id="next">Next</button>
     </div>
   </section>
 </main>
@@ -113,76 +210,270 @@ function term(text, tip) {
   s.tabIndex = 0; s.dataset.tip = tip; s.setAttribute("aria-description", tip);
   return s;
 }
-const row = (label, n) => { const tr = el("tr"); tr.append(el("td"), el("td", n, "num")); tr.firstChild.append(label); return tr; };
-const empty = text => { const tr = el("tr"); tr.append(el("td", text, "meta")); return tr; };
+// ponytail: the data has no currency, EUR assumed; change it here
+const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+const count = new Intl.NumberFormat();
+const pct = v => `${(v * 100).toFixed(1)}%`;
+const day = (s, opts = { day: "numeric", month: "short" }) => new Date(s.slice(0, 10) + "T12:00").toLocaleDateString(undefined, opts);
+const fullDate = s => day(s, { day: "numeric", month: "short", year: "numeric" });
+const regionNames = new Intl.DisplayNames(undefined, { type: "region" });
+const countryName = c => { try { return regionNames.of(c); } catch { return c; } };
 
-const ACTIONS = { request_kyc_documents: "Ask for ID documents", flag_for_rg_review: "Send to Responsible Gambling team",
-                  apply_deposit_limit: "Lower the weekly deposit limit", block_account: "Block account" };
-const DECLINES = {
-  kyc_not_verified: ["ID check not finished", "The player hasn't uploaded a government ID and proof of address yet."],
-  wagering_requirement_not_met: ["Bonus wagering not met", "The player hasn't bet the amount their bonus requires before withdrawing."],
-  self_exclusion_active: ["Player is self-excluded", "The player asked us to stop them gambling for a while."],
-  deposit_limit_reached: ["Deposit limit reached", "The player hit the most they can deposit this week."],
-};
-const WITHDRAWALS = { completed: "Paid out", declined: "Declined", cancelled: "Cancelled by the player", pending: "Still processing" };
+const state = { days: 30, country: "", sort: "turnover", dir: -1, page: 0, data: null };
+const PAGE = 25;
+const KYC = { verified: ["Verified", "ok"], pending: ["Pending", "wait"], rejected: ["Rejected", "bad"] };
+const STATUS = { active: ["Active", "ok"], self_excluded: ["Self-excluded", "bad"], blocked: ["Blocked", "bad"] };
+const DECLINES = { kyc_not_verified: "ID check not finished", wagering_requirement_not_met: "Bonus wagering not met",
+                   self_exclusion_active: "Player is self-excluded", deposit_limit_reached: "Deposit limit reached" };
 
-function ago(t) {
-  const min = Math.round((Date.now() - new Date(t.replace(" ", "T") + "Z")) / 60000);  // the DB stores UTC
-  return min < 60 ? `${min} min` : min < 1440 ? `${Math.round(min / 60)} h` : `${Math.round(min / 1440)} days`;
+// ---- loading -------------------------------------------------------------
+async function load() {
+  const q = new URLSearchParams({ days: state.days });
+  if (state.country) q.set("country", state.country);
+  history.replaceState(null, "", "?" + q);  // refresh, bookmark or share keeps the filters
+  const r = await fetch("/stats?" + q);
+  if (!r.ok) { $("asof").className = "asof small error"; $("asof").textContent = "Couldn't load the numbers. Refresh to try again."; return; }
+  const d = state.data = await r.json();
+  $("asof").className = "asof muted small";
+  $("asof").textContent = `${fullDate(d.start)} to ${fullDate(d.as_of)}, compared with the ${d.days} days before`;
+  if ($("country").options.length === 1) {
+    $("country").append(...d.countries.map(c => Object.assign(el("option", countryName(c)), { value: c })));
+    $("country").value = state.country;
+  }
+  renderTop(d); renderPlayers();
 }
 
-async function load() {
-  const r = await fetch("/stats");
-  if (!r.ok) { $("sub").className = "sub error"; $("sub").textContent = "Couldn't load the numbers. Refresh to try again."; return; }
-  const s = await r.json();
-  $("sub").className = "sub";
-  $("sub").textContent = `Player activity up to ${new Date(s.as_of).toLocaleDateString(undefined, { dateStyle: "long" })}. Updates every 30 seconds.`;
+// ---- revenue, chart, totals -----------------------------------------------
+// upIsGood: true (green when up), false (green when down), null (just informational, never colored)
+function delta(cur, prev, upIsGood = true) {
+  if (!prev) return el("span", "No data for the period before", "delta flat");
+  const change = (cur - prev) / Math.abs(prev);
+  const tone = upIsGood === null || change === 0 ? "flat" : (change > 0) === upIsGood ? "up" : "down";
+  const size = change >= 9 ? `${(cur / prev).toFixed(0)}× the` : `${Math.abs(change * 100).toFixed(0)}% vs the`;  // 55500% reads as noise
+  return el("span", `${change >= 0 ? "▲" : "▼"} ${size} ${state.days} days before`, "delta " + tone);
+}
 
-  const pending = s.cases.pending || 0;
-  $("pending").textContent = pending;
-  $("pending").classList.toggle("hot", pending > 0);
-  $("review").hidden = !pending;
-  $("pending-by").replaceChildren(...s.pending_by_action.map(a => el("li", `${a.n} × ${ACTIONS[a.action] || a.action}`)));
-  $("oldest").textContent = s.cases.oldest_pending ? `Oldest has waited ${ago(s.cases.oldest_pending)}` : "Nothing waiting. All clear.";
+function renderTop(d) {
+  const k = d.kpis, p = d.prev;
+  $("ggr").textContent = money.format(k.ggr);
+  $("ggr").classList.toggle("neg", k.ggr < 0);
+  $("ggr-delta").replaceChildren(delta(k.ggr, p.ggr));
+  $("hold").textContent = k.turnover ? `Kept ${pct(k.ggr / k.turnover)} of ${money.format(k.turnover)} bet` : "No bets in this period";
+  drawChart(d.daily);
 
-  const tile = (v, label, tip) => {
-    const d = el("div", "", "tile");
-    const l = el("div", "", "l"); l.append(tip ? term(label, tip) : label);
-    d.append(el("div", (v || 0).toLocaleString(), "v"), l);
-    return d;
+  const tile = (value, label, tip, cur, prev, upIsGood) => {
+    const t = el("div", "", "tile"), l = el("div", "", "l");
+    l.append(tip ? term(label, tip) : label);
+    t.append(l, el("div", value, "v"), delta(cur, prev, upIsGood));
+    return t;
   };
   $("tiles").replaceChildren(
-    tile(s.cases.approved, "Approved actions"),
-    tile(s.cases.rejected, "Rejected actions"),
-    tile(s.players.kyc_unfinished, "ID check not finished", "Players who can't withdraw until they upload a government ID and proof of address."),
-    tile(s.players.self_excluded, "Self-excluded", "Players who asked us to stop them gambling for a while. They can't deposit or play."),
-    tile(s.players.blocked, "Blocked accounts", "Can't log in or play. Used for fraud or abuse."),
+    tile(money.format(k.turnover), "Bets placed", "Total amount players bet (turnover).", k.turnover, p.turnover),
+    tile(money.format(k.deposits), "Deposits", "Money players put in. Declined deposits aren't counted.", k.deposits, p.deposits),
+    tile(money.format(k.withdrawals), "Withdrawals paid", "Money paid out to players. Declined and cancelled ones aren't counted.", k.withdrawals, p.withdrawals, null),
+    tile(count.format(k.active_players), "Active players", "Players who placed at least one bet in the period.", k.active_players, p.active_players),
+    tile(count.format(k.new_players), "New sign-ups", null, k.new_players, p.new_players),
   );
-
-  $("risk").replaceChildren(...s.at_risk.map(p => {
-    const li = el("li"), hot = p.risk_score >= 50;
-    const meter = el("div", "", "meter" + (hot ? " hot" : ""));
-    meter.append(Object.assign(el("i"), { style: `width:${p.risk_score}%` }));
-    meter.setAttribute("role", "img"); meter.setAttribute("aria-label", `Risk score ${p.risk_score} of 100`);
-    const score = el("div"); score.append(el("strong", `Player ${p.player_id}`), el("span", p.risk_score, "score"));
-    const check = Object.assign(el("a", "Check player"), {
-      href: "/?q=" + encodeURIComponent(`Is there anything concerning about player ${p.player_id}'s recent activity?`) });
-    li.append(score, meter, el("div", p.reasons.join("; "), "why"), check);
-    return li;
-  }));
-  if (!s.at_risk.length) $("risk").append(el("li", "No warning signs this week.", "meta"));
-
-  $("withdrawals").replaceChildren(...s.withdrawals.map(w => row(WITHDRAWALS[w.status] || w.status, w.n)));
-  if (!s.withdrawals.length) $("withdrawals").append(empty("No withdrawals this week."));
-  $("declines").replaceChildren(...s.declines.map(d => {
-    const [label, tip] = DECLINES[d.reason] || [d.reason || "No reason given", null];
-    return row(tip ? term(label, tip) : label, d.n);
-  }));
-  if (!s.declines.length) $("declines").append(empty("Nothing declined this week."));
+  renderAttention(d); renderGames(d.games);
 }
 
+function drawChart(daily) {
+  const box = $("chart"), W = box.clientWidth || 600, H = 200, L = 56, R = 4, T = 10, B = 24;
+  const vals = daily.map(x => x.ggr), max = Math.max(0, ...vals), min = Math.min(0, ...vals), span = (max - min) || 1;
+  const y = v => T + (max - v) / span * (H - T - B);
+  const step = (W - L - R) / daily.length, bw = Math.max(1, Math.min(18, step - 2));
+  const tick = v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--${v ? "grid" : "muted"})" />` +
+                    `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${money.format(v)}</text>`;
+  const bars = daily.map((x, i) => {
+    const h = Math.abs(y(x.ggr) - y(0)), cx = L + i * step + (step - bw) / 2;
+    return `<rect x="${cx}" y="${Math.min(y(x.ggr), y(0))}" width="${bw}" height="${x.ggr ? Math.max(h, 1) : 0}" rx="${Math.min(2, bw / 2)}"
+                  fill="var(--${x.ggr < 0 ? "warn" : "accent"})" />` +
+           `<rect class="hit" data-i="${i}" x="${L + i * step}" y="${T}" width="${step}" height="${H - T - B}" fill="transparent" />`;
+  }).join("");
+  const labels = [0, Math.floor(daily.length / 2), daily.length - 1].map(i =>
+    `<text x="${L + i * step + step / 2}" y="${H - 6}" text-anchor="${!i ? "start" : i === daily.length - 1 ? "end" : "middle"}">${day(daily[i].day)}</text>`).join("");
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}">${[max, min].filter(Boolean).map(tick).join("")}${tick(0)}${bars}${labels}</svg>`;
+  box.setAttribute("aria-label", `Revenue per day over ${daily.length} days. Best day ${money.format(max)}, worst day ${money.format(min)}.`);
+
+  const tip = el("div", "", "tip"); tip.hidden = true; box.append(tip);
+  box.querySelectorAll(".hit").forEach(h => {
+    h.onmouseenter = () => {
+      const x = daily[h.dataset.i];
+      tip.replaceChildren(el("b", fullDate(x.day)), `Revenue ${money.format(x.ggr)}`, el("br"), `Bets placed ${money.format(x.turnover)}`,
+                          el("br"), `Deposits ${money.format(x.deposits)}`, el("br"), `${x.players} players`);
+      tip.hidden = false;
+      const mid = +h.getAttribute("x") + step / 2;
+      tip.style.left = Math.min(Math.max(0, mid - tip.offsetWidth / 2), W - tip.offsetWidth) + "px";
+      tip.style.top = "-8px";
+      h.setAttribute("fill", "var(--grid)"); h.setAttribute("fill-opacity", ".6");
+    };
+    h.onmouseleave = () => { tip.hidden = true; h.setAttribute("fill", "transparent"); };
+  });
+
+  // Same numbers as a table, for screen readers and anyone who wants exact values
+  const det = el("details"); det.append(el("summary", "Show as table"));
+  const tbl = el("table"), body = el("tbody");
+  tbl.innerHTML = "<thead><tr><th>Day</th><th class=num>Revenue</th><th class=num>Bets placed</th><th class=num>Deposits</th><th class=num>Players</th></tr></thead>";
+  for (const x of [...daily].reverse()) {
+    const tr = el("tr");
+    tr.append(el("td", fullDate(x.day)), el("td", money.format(x.ggr), "num" + (x.ggr < 0 ? " neg" : "")),
+              el("td", money.format(x.turnover), "num"), el("td", money.format(x.deposits), "num"), el("td", x.players, "num"));
+    body.append(tr);
+  }
+  tbl.append(body); det.append(tbl); box.append(det);
+}
+
+// ---- needs attention, games -------------------------------------------------
+function renderAttention(d) {
+  const P = d.players;
+  // action: a function filters the player table, a string is a link, null is plain text
+  const item = (n, what, how, action, extra) => {
+    const tag = typeof action === "function" ? "button" : action ? "a" : "div";
+    const li = el("li"), b = el(tag, "", "item"), txt = el("div");
+    if (tag === "button") { b.type = "button"; b.onclick = action; } else if (tag === "a") b.href = action;
+    txt.append(el("div", what, "what"), el("div", how, "how"));
+    if (extra) txt.append(extra);
+    b.append(el("div", count.format(n), "n" + (n ? " hot" : "")), txt);
+    li.append(b); return li;
+  };
+  const show = f => () => { setFilters(f); $("players-section").scrollIntoView({ behavior: "smooth" }); };
+  const declined = d.declines.reduce((a, x) => a + x.n, 0);
+  const reasons = el("ul");
+  reasons.append(...d.declines.map(x => el("li", `${x.n} × ${DECLINES[x.reason] || x.reason || "No reason"} (${money.format(x.amount)})`)));
+  $("attn").replaceChildren(
+    item(d.pending.n, "Waiting for a supervisor", d.pending.n ? `Oldest since ${fullDate(d.pending.oldest)}. Open the approval list.`
+                                                              : "Nothing waiting. Open the approval list.", "/#queue"),
+    item(P.filter(p => p.risk_score > 0).length, "Players with warning signs", "Gambling-harm signals this week", show({ risk: true })),
+    item(P.filter(p => p.kyc_status !== "verified").length, "ID check not finished", "These players can't withdraw", show({ kyc: "unfinished" })),
+    item(P.filter(p => p.account_status === "self_excluded").length, "Self-excluded", "Can't deposit or play until it ends", show({ status: "self_excluded" })),
+    item(P.filter(p => p.account_status === "blocked").length, "Blocked accounts", "Fraud or abuse", show({ status: "blocked" })),
+    item(declined, "Payments declined", `In the last ${d.days} days`, null, declined ? reasons : null),
+  );
+}
+
+function renderGames(games) {
+  $("games-note").textContent = games.length ? `${games.length} games, highest revenue first` : "";
+  const top = Math.max(1, ...games.map(g => Math.abs(g.ggr)));
+  $("games").replaceChildren(...games.map(g => {
+    const tr = el("tr"), name = el("td", "", "who"), rev = el("td", "", "num" + (g.ggr < 0 ? " neg" : ""));
+    name.append(el("b", g.name), el("span", g.category, "muted small"));
+    rev.append(Object.assign(el("span", "", "bar" + (g.ggr < 0 ? " neg" : "")), { style: `width:${Math.abs(g.ggr) / top * 60}px` }), money.format(g.ggr));
+    const kept = g.turnover ? g.ggr / g.turnover : 0;
+    tr.append(name, el("td", g.provider, "muted"), el("td", count.format(g.players), "num"), el("td", money.format(g.turnover), "num"), rev,
+              el("td", `${pct(kept)} / ${pct(1 - g.rtp)}`, "num" + (kept < 0 ? " neg" : "")));
+    return tr;
+  }));
+  if (!games.length) {
+    const tr = el("tr"), td = el("td", "No bets in this period.", "empty");
+    td.colSpan = 6; tr.append(td); $("games").append(tr);
+  }
+}
+
+// ---- players table ----------------------------------------------------------
+const COLS = [  // [field, header, numeric, header tooltip]
+  ["id", "Player"], ["country", "Country"], ["registered_at", "Joined"], ["kyc_status", "ID check"], ["account_status", "Account"],
+  ["deposits", "Deposits", 1], ["withdrawals", "Withdrawals", 1], ["turnover", "Bets placed", 1],
+  ["ggr", "Revenue", 1, "What this player bet minus what they won back. Red means the player is up."],
+  ["last_bet", "Last bet", 1],
+  ["risk_score", "Risk", 1, "0 to 100, from this week's gambling-harm signals: big deposit jumps, late-night play, chasing losses, cancelled withdrawals, long sessions. 50+ is red. Hover a score for the reasons."],
+];
+const filters = () => ({ q: $("search").value.trim().toLowerCase(), kyc: $("f-kyc").value, status: $("f-status").value,
+                         risk: $("f-risk").checked, active: $("f-active").checked });
+function setFilters({ q = "", kyc = "", status = "", risk = false, active = false }) {
+  $("search").value = q; $("f-kyc").value = kyc; $("f-status").value = status; $("f-risk").checked = risk; $("f-active").checked = active;
+  if (risk) { state.sort = "risk_score"; state.dir = -1; }
+  state.page = 0; renderPlayers();
+}
+function visiblePlayers() {
+  const f = filters(), k = state.sort;
+  return state.data.players.filter(p =>
+    (!f.q || p.username.toLowerCase().includes(f.q) || String(p.id).includes(f.q)) &&
+    (!f.kyc || (f.kyc === "unfinished" ? p.kyc_status !== "verified" : p.kyc_status === f.kyc)) &&
+    (!f.status || p.account_status === f.status) && (!f.risk || p.risk_score > 0) && (!f.active || p.bets > 0)
+  ).sort((a, b) => ((a[k] ?? "") > (b[k] ?? "") ? 1 : (a[k] ?? "") < (b[k] ?? "") ? -1 : 0) * state.dir || a.id - b.id);
+}
+function ago(s) {
+  if (!s) return "Never";
+  const n = Math.floor((new Date(state.data.as_of + "T23:59") - new Date(s.replace(" ", "T"))) / 864e5);
+  return n < 1 ? "Today" : n === 1 ? "Yesterday" : n < 30 ? `${n} days ago` : fullDate(s);
+}
+
+function renderPlayers() {
+  if (!state.data) return;
+  const f = filters();
+  $("clear").hidden = !(f.q || f.kyc || f.status || f.risk || f.active);
+  $("phead").replaceChildren(...COLS.map(([key, label, isNum, tip]) => {
+    const th = el("th", "", isNum ? "num" : ""), b = el("button", label);
+    b.type = "button";
+    b.onclick = () => { state.dir = state.sort === key ? -state.dir : (isNum ? -1 : 1); state.sort = key; state.page = 0; renderPlayers(); };
+    if (tip) th.append(term("?", tip), " ");
+    th.append(b);
+    if (state.sort === key) th.setAttribute("aria-sort", state.dir > 0 ? "ascending" : "descending");
+    return th;
+  }), el("th"));
+
+  const rows = visiblePlayers(), pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  state.page = Math.min(state.page, pages - 1);
+  const slice = rows.slice(state.page * PAGE, (state.page + 1) * PAGE), total = state.data.players.length;
+  $("pcount").textContent = `(${count.format(rows.length)}${rows.length !== total ? " of " + count.format(total) : ""})`;
+  $("range").textContent = rows.length ? `${state.page * PAGE + 1}–${state.page * PAGE + slice.length} of ${rows.length}` : "";
+  $("prev").disabled = state.page === 0; $("next").disabled = state.page >= pages - 1;
+
+  const pill = ([text, cls]) => { const td = el("td"); td.append(el("span", text, "pill " + cls)); return td; };
+  $("players").replaceChildren(...slice.map(p => {
+    const tr = el("tr"), who = el("td", "", "who"), risk = el("td", "", "num"), ask = el("td"), a = el("a", "Ask");
+    who.append(el("b", p.username), el("span", `#${p.id}`, "muted small"));
+    if (p.risk_score) {
+      const m = el("span", "", "meter" + (p.risk_score >= 50 ? " hot" : ""));
+      m.append(Object.assign(el("i"), { style: `width:${p.risk_score}%` }));
+      risk.append(m, term(String(p.risk_score), p.risk_reasons.join("; ")));
+    } else risk.append(el("span", "–", "muted"));
+    a.href = "/?q=" + encodeURIComponent(`Give me an overview of player ${p.id}: account, recent activity and anything concerning.`);
+    a.setAttribute("aria-label", `Ask the assistant about player ${p.id}`);
+    ask.append(a);
+    tr.append(who, el("td", countryName(p.country)), el("td", fullDate(p.registered_at), "muted"),
+              pill(KYC[p.kyc_status] || [p.kyc_status, "wait"]), pill(STATUS[p.account_status] || [p.account_status, "wait"]),
+              el("td", money.format(p.deposits), "num"), el("td", money.format(p.withdrawals), "num"),
+              el("td", money.format(p.turnover), "num"), el("td", money.format(p.ggr), "num" + (p.ggr < 0 ? " neg" : "")),
+              el("td", ago(p.last_bet), "num muted"), risk, ask);
+    return tr;
+  }));
+  if (!slice.length) {
+    const tr = el("tr"), td = el("td", "No players match these filters.", "empty");
+    td.colSpan = COLS.length + 1; tr.append(td); $("players").append(tr);
+  }
+}
+
+function exportCsv() {
+  const cols = ["id", "username", "country", "registered_at", "kyc_status", "account_status", "weekly_deposit_limit",
+                "deposits", "withdrawals", "bets", "turnover", "ggr", "last_bet", "risk_score"];
+  const cell = v => /[",\n]/.test(v = String(v ?? "")) ? `"${v.replaceAll('"', '""')}"` : v;
+  const csv = [cols, ...visiblePlayers().map(p => cols.map(c => typeof p[c] === "number" ? Math.round(p[c] * 100) / 100 : p[c]))]
+    .map(r => r.map(cell).join(",")).join("\n");
+  const a = Object.assign(el("a"), { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })),
+                                     download: `players_${state.data.as_of}_${state.days}d${state.country ? "_" + state.country : ""}.csv` });
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ---- wiring -----------------------------------------------------------------
+const setPeriod = days => {
+  state.days = days;
+  document.querySelectorAll("#period button").forEach(b => b.setAttribute("aria-pressed", +b.dataset.days === days));
+};
+document.querySelectorAll("#period button").forEach(b => b.onclick = () => { setPeriod(+b.dataset.days); load(); });
+$("country").onchange = () => { state.country = $("country").value; load(); };
+["search", "f-kyc", "f-status", "f-risk", "f-active"].forEach(id => $(id).oninput = () => { state.page = 0; renderPlayers(); });
+$("clear").onclick = () => setFilters({});
+$("csv").onclick = exportCsv;
+$("prev").onclick = () => { state.page--; renderPlayers(); };
+$("next").onclick = () => { state.page++; renderPlayers(); };
+let resizing; addEventListener("resize", () => { clearTimeout(resizing); resizing = setTimeout(() => state.data && drawChart(state.data.daily), 150); });
+
+const url = new URLSearchParams(location.search);
+setPeriod([7, 30, 90].includes(+url.get("days")) ? +url.get("days") : 30);
+state.country = url.get("country") || "";
 load();
-setInterval(load, 30000);
+setInterval(load, 60000);
 </script>
 </body>
 </html>
