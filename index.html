@@ -6,87 +6,87 @@
 <title>Player Support Assistant</title>
 <link rel="icon" href="/favicon.ico?v=2" sizes="any">
 <style>
-  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6eb;
-          --accent: #4f46e5; --warn: #b91c1c; --warn-bg: #fef2f2; --ok: #15803d; --ok-bg: #f0fdf4;
-          --hl: #fef9c3; color-scheme: light dark; }
+  :root { --paper: #f6f7f5; --surface: #fff; --ink: #17201b; --muted: #5d6862; --line: #dde2de;
+          --accent: #13684d; --on-accent: #fff; --warn: #b42318; --warn-bg: #fdf0ee; color-scheme: light dark; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #111318; --card: #1a1d24; --text: #e6e8ec; --muted: #9aa1ad; --line: #2b2f38;
-            --accent: #818cf8; --warn: #f87171; --warn-bg: #2a1618; --ok: #4ade80; --ok-bg: #12241a;
-            --hl: #3a3416; }
+    :root { --paper: #101412; --surface: #171c19; --ink: #e7ece9; --muted: #9aa59f; --line: #2a322e;
+            --accent: #4fbf93; --on-accent: #0c1f17; --warn: #f5877b; --warn-bg: #2a1715; }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
-  h1 { font-size: 24px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
-  h2 { font-size: 17px; margin: 0 0 4px; }
-  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 16px 0 4px; }
-  h3:first-child { margin-top: 0; }
-  p { margin: 0 0 8px; }
-  a { color: var(--accent); }
-  .sub { color: var(--muted); margin: 0 0 16px; }
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 20px; padding: 0; list-style: none;
-           counter-reset: step; }
-  .steps li { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
-              font-size: 13px; color: var(--muted); counter-increment: step; }
-  .steps li::before { content: counter(step); display: inline-grid; place-items: center; width: 20px; height: 20px;
-                      margin-right: 6px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 600; }
-  .steps b { color: var(--text); }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 system-ui, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 28px 16px 64px; }
+  h1 { font-size: 20px; margin: 0; display: flex; align-items: center; gap: 10px; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  p { margin: 0; }
+  .sub { color: var(--muted); margin: 4px 0 20px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
   form { display: flex; gap: 8px; }
-  input { flex: 1; min-width: 0; padding: 10px 12px; font: inherit; color: inherit; background: var(--card);
+  input { flex: 1; min-width: 0; padding: 12px 14px; font: inherit; color: inherit; background: var(--surface);
           border: 1px solid var(--line); border-radius: 8px; }
   button { padding: 10px 16px; font: inherit; border-radius: 8px; border: 1px solid var(--line);
-           background: var(--card); color: inherit; cursor: pointer; }
-  button[type=submit] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+           background: var(--surface); color: inherit; cursor: pointer; }
+  button[type=submit] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
   button:disabled { opacity: .5; cursor: wait; }
-  .examples { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0 24px; font-size: 13px; color: var(--muted); }
+  .examples { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0 28px; font-size: 13px; color: var(--muted); }
   .examples button { padding: 4px 10px; font-size: 13px; border-radius: 999px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
-  .topic { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
-  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; border: 1px solid currentColor; }
-  .big { font-size: 17px; font-weight: 600; }
-  .answer { white-space: pre-wrap; }
-  .banner { border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; border: 1px solid; }
-  .banner.warn { background: var(--warn-bg); border-color: var(--warn); }
-  .banner.warn strong { color: var(--warn); }
-  .banner.ok { background: var(--ok-bg); border-color: var(--ok); }
-  .banner.ok strong { color: var(--ok); }
-  .banner p { margin: 4px 0 0; }
-  ul { margin: 0; padding-left: 20px; }
-  details summary { cursor: pointer; color: var(--muted); }
-  details[open] summary { margin-bottom: 8px; }
-  .steps-done li { margin-bottom: 4px; }
-  .tech { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; word-break: break-word; }
-  .status { color: var(--muted); }
+
+  /* Hover, focus or tap a dotted word to see what it means. On phones the tip docks to the bottom of the screen. */
+  .term { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; position: relative; }
+  .term:hover::after, .term:focus::after {
+    content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); z-index: 10;
+    width: max-content; max-width: min(300px, 80vw); padding: 8px 10px; border-radius: 6px;
+    background: var(--ink); color: var(--paper); font-size: 13px; font-weight: 400; line-height: 1.45;
+    white-space: normal; pointer-events: none; }
+  @media (max-width: 560px) {
+    .term:hover::after, .term:focus::after { position: fixed; top: auto; left: 12px; right: 12px; bottom: 12px; max-width: none; width: auto; }
+  }
+
+  .status { color: var(--muted); margin-bottom: 10px; }
   .error { color: var(--warn); }
+  .skeleton { border-left: 4px solid var(--line); padding: 4px 0 4px 18px; margin-bottom: 32px; }
+  .skeleton i { display: block; height: 14px; margin: 10px 0; border-radius: 4px; background: var(--line); animation: pulse 1.2s ease-in-out infinite; }
+  .skeleton i:first-child { height: 22px; width: 85%; } .skeleton i:nth-child(2) { width: 60%; } .skeleton i:nth-child(3) { width: 70%; }
+  @keyframes pulse { 50% { opacity: .4; } }
+  @media (prefers-reduced-motion: reduce) { .skeleton i { animation: none; } }
+
+  /* The verdict: the one loud thing on the page. Its rail turns red when the RG team must step in. */
+  .verdict { border-left: 4px solid var(--accent); padding: 2px 0 2px 18px; margin-bottom: 36px; }
+  .verdict.esc { border-color: var(--warn); }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  .badge { display: inline-block; padding: 1px 10px; border-radius: 999px; border: 1px solid currentColor; font-size: 13px; }
+  .cause { font-size: 21px; line-height: 1.35; font-weight: 600; margin-bottom: 10px; }
+  .label { color: var(--muted); font-size: 13px; font-weight: 600; margin-right: 6px; }
+  .rg { margin-top: 12px; font-size: 14px; color: var(--muted); }
+  .verdict.esc .rg { background: var(--warn-bg); color: var(--warn); font-weight: 600; padding: 8px 12px; border-radius: 6px; }
+  .suggested { margin-top: 14px; font-size: 14px; }
+  .suggested li { margin-top: 4px; }
+  details { margin-top: 14px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  details[open] summary { margin-bottom: 10px; }
+  .answer { white-space: pre-wrap; margin-bottom: 10px; }
+  ul, ol { margin: 0; padding-left: 20px; }
+  .tech { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; word-break: break-word; }
+
+  section { border-top: 1px solid var(--line); padding-top: 20px; margin-top: 8px; }
+  .count { color: var(--muted); font-weight: 400; }
   .list { list-style: none; padding: 0; }
   .list li { padding: 12px 0; border-top: 1px solid var(--line); }
-  .list li:first-child { border-top: 0; padding-top: 4px; }
+  .list li:first-child { border-top: 0; padding-top: 0; }
   .meta { color: var(--muted); font-size: 13px; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
   .row button { padding: 5px 14px; font-size: 13px; }
-  .approve { color: var(--ok); border-color: var(--ok); } .reject { color: var(--warn); border-color: var(--warn); }
-  .s-approved { color: var(--ok); } .s-rejected { color: var(--warn); } .s-pending { color: var(--accent); }
-  .glossary dt { font-weight: 600; margin-top: 12px; scroll-margin-top: 16px; }
-  .glossary dt:first-child { margin-top: 0; }
-  .glossary dt:target, .glossary dt:target + dd { background: var(--hl); }
-  .glossary dd { margin: 2px 0 0; color: var(--muted); }
-  @media (max-width: 560px) { .steps { grid-template-columns: 1fr; } }
+  .approve { color: var(--accent); border-color: var(--accent); } .reject { color: var(--warn); border-color: var(--warn); }
+  .s-approved { color: var(--accent); } .s-rejected { color: var(--warn); } .s-pending { color: var(--muted); }
 </style>
 </head>
 <body>
 <main>
-  <h1><img src="/favicon.ico?v=2" alt="" width="28" height="28"> Player Support Assistant</h1>
-  <p class="sub">Ask a question about a player in plain words. The assistant checks their account and our rules,
-    explains what happened, and suggests what to do next.</p>
-
-  <ol class="steps">
-    <li><b>Ask</b> about a player, using their player number.</li>
-    <li><b>Read</b> what happened and what to tell the player.</li>
-    <li><b>A supervisor approves</b> any suggested action. The assistant never changes an account by itself.</li>
-  </ol>
+  <h1><img src="/favicon.ico?v=2" alt="" width="26" height="26"> Player Support Assistant</h1>
+  <p class="sub" id="sub">Ask about a player and get what happened and what to do.</p>
 
   <form id="form">
-    <input id="q" required minlength="3" maxlength="500" aria-label="Your question"
+    <input id="q" required minlength="3" maxlength="500" aria-label="Your question" autofocus
            placeholder="e.g. Why was player 1042's withdrawal declined?">
     <button type="submit" id="go">Ask</button>
   </form>
@@ -96,102 +96,91 @@
     <button type="button" data-q="Player 1077 says their withdrawal was rejected unfairly. What happened?">Withdrawal complaint (1077)</button>
     <button type="button" data-q="Is there anything concerning about player 1100's recent activity?">Worrying activity? (1100)</button>
     <button type="button" data-q="Player 1150 wants to deposit again. What should we do?">Wants to play again (1150)</button>
-    <button type="button" data-q="Which players are most at risk this week?">Most at-risk players this week</button>
+    <button type="button" data-q="Which players are most at risk this week?">Most at risk this week</button>
   </div>
 
   <p id="status" class="status" role="status" hidden></p>
+  <div id="skeleton" class="skeleton" hidden aria-hidden="true"><i></i><i></i><i></i></div>
 
-  <div id="result" hidden>
-    <div class="card">
-      <div class="topic" id="topic"></div>
-      <h3>What happened</h3>
-      <p id="cause" class="big"></p>
-      <h3>What to do next</h3>
-      <p id="todo"></p>
+  <div id="result" class="verdict" hidden>
+    <div class="tags" id="tags"></div>
+    <p id="cause" class="cause"></p>
+    <p><span class="label">What to do</span><span id="todo"></span></p>
+    <p id="rg" class="rg"></p>
+    <div id="suggested" class="suggested" hidden>
+      <span class="label">Suggested, waiting for a supervisor</span>
+      <ul id="suggested-list"></ul>
     </div>
-    <div id="rg"></div>
-    <div class="card">
-      <h3>Full explanation</h3>
-      <p id="answer" class="answer"></p>
-      <h3>What the assistant found</h3>
-      <ul id="evidence"></ul>
-    </div>
-    <div class="card" id="suggested" hidden>
-      <h2>Suggested actions</h2>
-      <p class="meta">Nothing has been done yet. These wait for a supervisor in <a href="#queue">Waiting for approval</a> below.</p>
-      <ul id="suggested-list" class="list"></ul>
-    </div>
-    <div class="card">
-      <details>
-        <summary>How the assistant checked (step by step)</summary>
-        <ol id="tools" class="steps-done"></ol>
-      </details>
-    </div>
-  </div>
-
-  <div class="card" id="queue">
-    <h2>Waiting for approval</h2>
-    <p class="meta">Actions the assistant suggested. Only a supervisor can approve or reject them; your browser will ask
-      for your approver login. Nothing happens to the player's account until someone clicks Approve.</p>
-    <ul id="pending" class="list"></ul>
-  </div>
-
-  <div class="card">
     <details>
-      <summary>Decision history</summary>
-      <p class="meta">Every approved or rejected action, who decided and when. It can't be edited or deleted.</p>
-      <ul id="history" class="list"></ul>
+      <summary>Details: full answer, evidence and how it checked</summary>
+      <p id="answer" class="answer"></p>
+      <ul id="evidence"></ul>
+      <p class="label" style="margin-top:10px">Steps</p>
+      <ol id="tools"></ol>
     </details>
   </div>
 
-  <div class="card">
-    <h2>Words you might see</h2>
-    <dl class="glossary">
-      <dt id="g-kyc">KYC (Know Your Customer)</dt>
-      <dd>The identity check. Before a player can withdraw money, they must upload a government ID and a proof of
-        address. If the check isn't finished, withdrawals are declined.</dd>
-      <dt id="g-wagering">Wagering requirement</dt>
-      <dd>A bonus comes with a rule: the player must bet a set amount (for example 35 times the bonus) before they
-        can withdraw. Until they have, withdrawals are declined.</dd>
-      <dt id="g-rg">Responsible Gambling (RG)</dt>
-      <dd>Our duty to protect players from gambling harm. The RG team are specialists who review worrying accounts
-        and talk to players about their gambling.</dd>
-      <dt id="g-escalate">Hand over to the RG team ("Escalate to RG")</dt>
-      <dd>The player shows signs of gambling harm, so the RG team needs to look at the account. Don't try to handle
-        it alone: make sure the "Send to Responsible Gambling team" action gets approved, and stay calm and
-        non-judgmental with the player.</dd>
-      <dt id="g-risk">Risk score</dt>
-      <dd>A number from 0 to 100 that adds up warning signs, such as: depositing much more than usual, playing mostly
-        between midnight and 5 am, betting more after losing (chasing losses), cancelling a withdrawal and gambling
-        the money, very long sessions, and hitting a deposit limit. Higher means more worrying.</dd>
-      <dt id="g-self">Self-exclusion</dt>
-      <dd>The player asked us to stop them from gambling for a period. They can't deposit or play until it ends,
-        even if they ask, and we must not encourage them to come back.</dd>
-      <dt id="g-limit">Deposit limit</dt>
-      <dd>The most a player can deposit per week. We can lower it straight away; raising it needs a cooling-off
-        period, so it can't be done here.</dd>
-      <dt id="g-block">Block account</dt>
-      <dd>The player can't log in or play. Used for fraud or abuse, not for gambling harm (that goes to the RG team).</dd>
-    </dl>
-  </div>
+  <section id="queue">
+    <h2>Waiting for approval <span id="count" class="count"></span></h2>
+    <ul id="pending" class="list"></ul>
+  </section>
+
+  <section>
+    <details>
+      <summary>Decision history</summary>
+      <ul id="history" class="list"></ul>
+    </details>
+  </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
 const el = (tag, text, cls) => Object.assign(document.createElement(tag), { textContent: text ?? "", className: cls || "" });
-const link = (text, href) => Object.assign(el("a", text), { href });
+
+const TIP = {
+  kyc: "The identity check. To withdraw, a player must upload a government ID and proof of address. Until it's done, withdrawals are declined.",
+  wagering: "A bonus comes with a rule: the player must bet a set amount (e.g. 35× the bonus) before they can withdraw.",
+  rg: "Responsible Gambling: our duty to protect players from gambling harm. The RG team are specialists who review worrying accounts.",
+  escalate: "The player shows signs of gambling harm. Make sure “Send to Responsible Gambling team” gets approved, and stay calm and non-judgmental with the player.",
+  risk: "0 to 100. Adds up warning signs: deposits far above usual, late-night play, chasing losses, cancelled withdrawals, very long sessions, hitting a deposit limit.",
+  self: "The player asked us to stop them gambling for a while. They can't deposit or play until it ends, even if they ask. Never encourage them back.",
+  limit: "The most a player can deposit per week. We can lower it straight away; raising it needs a cooling-off period.",
+  block: "The player can't log in or play. For fraud or abuse only; gambling harm goes to the RG team instead.",
+  chasing: "Betting more after losing, to win the money back. A warning sign of gambling harm.",
+  approval: "The assistant never changes an account itself. A supervisor approves or rejects every suggestion, and your browser will ask for the approver login.",
+};
+// Words in the assistant's text that get a hover explanation. No capturing groups inside the patterns.
+const TERMS = [["KYC|identity check", TIP.kyc], ["wagering(?: requirements?)?", TIP.wagering],
+               ["responsible gambling|RG(?: team)?", TIP.rg], ["risk score", TIP.risk], ["self-exclu\\w*", TIP.self],
+               ["deposit limits?", TIP.limit], ["chas\\w* (?:their )?loss\\w*", TIP.chasing]];
+const TERM_RE = new RegExp("\\b(?:" + TERMS.map(([p]) => `(${p})`).join("|") + ")\\b", "gi");
+
+function term(text, tip) {
+  const s = el("span", text, "term");
+  s.tabIndex = 0; s.dataset.tip = tip; s.setAttribute("aria-description", tip);
+  return s;
+}
+function rich(text) {  // plain text with glossary words turned into hover terms
+  const out = []; let last = 0;
+  for (const m of text.matchAll(TERM_RE)) {
+    out.push(text.slice(last, m.index), term(m[0], TERMS[m.slice(1).findIndex(Boolean)][1]));
+    last = m.index + m[0].length;
+  }
+  out.push(text.slice(last));
+  return out;
+}
 
 const TOPICS = {
-  kyc: ["Identity check (KYC)", "#g-kyc"],
-  bonus_wagering: ["Bonus rules (wagering)", "#g-wagering"],
-  responsible_gambling: ["Gambling harm risk", "#g-rg"],
-  self_exclusion: ["Self-exclusion", "#g-self"],
+  kyc: ["Identity check (KYC)", TIP.kyc],
+  bonus_wagering: ["Bonus rules (wagering)", TIP.wagering],
+  responsible_gambling: ["Gambling harm risk", TIP.rg],
+  self_exclusion: ["Self-exclusion", TIP.self],
   other: ["Other", null],
 };
 const ACTIONS = {
-  request_kyc_documents: ["Ask for ID documents", "The player uploads a government ID and proof of address.", "#g-kyc"],
-  flag_for_rg_review: ["Send to Responsible Gambling team", "A specialist reviews the account and may contact the player.", "#g-rg"],
-  apply_deposit_limit: ["Lower the weekly deposit limit", "The player can't deposit more than this per week.", "#g-limit"],
-  block_account: ["Block account", "The player can't log in or play.", "#g-block"],
+  request_kyc_documents: ["Ask for ID documents", TIP.kyc],
+  flag_for_rg_review: ["Send to Responsible Gambling team", TIP.rg],
+  apply_deposit_limit: ["Lower the weekly deposit limit", TIP.limit],
+  block_account: ["Block account", TIP.block],
 };
 const STEPS = {
   get_player: "Looked up the player's account",
@@ -202,59 +191,57 @@ const STEPS = {
   search_policy: "Read our rules",
   propose_action: "Suggested an action for approval",
 };
-const STATUS = { pending: "Waiting for approval", approved: "Approved", rejected: "Rejected" };
+const STATUS = { pending: "Waiting", approved: "Approved", rejected: "Rejected" };
 const when = t => new Date(t.replace(" ", "T") + "Z").toLocaleString();  // the DB stores UTC
 const who = p => p.startsWith("agent:") ? "the assistant" : p;
 
+$("sub").append(" Actions need a ", term("supervisor's approval", TIP.approval), ".");
 document.querySelectorAll(".examples button").forEach(b => b.onclick = () => { $("q").value = b.dataset.q; $("form").requestSubmit(); });
 
 $("form").onsubmit = async e => {
   e.preventDefault();
-  $("go").disabled = true; $("result").hidden = true;
+  $("go").disabled = true; $("result").hidden = true; $("skeleton").hidden = false;
   $("status").hidden = false; $("status").className = "status";
   const start = Date.now();
   const show = () => $("status").textContent =
-    `Checking the account and our rules… ${Math.round((Date.now() - start) / 1000)}s (usually under 15 seconds)`;
+    `Checking the account and our rules… ${Math.round((Date.now() - start) / 1000)}s`;
   show(); const tick = setInterval(show, 1000);
   try {
     const r = await fetch("/investigate", { method: "POST", headers: { "Content-Type": "application/json" },
                                             body: JSON.stringify({ question: $("q").value }) });
     const data = await r.json();
-    if (!r.ok) throw new Error(typeof data.detail === "string" ? data.detail : "please check the question and try again");
+    if (!r.ok) throw new Error(typeof data.detail === "string" ? data.detail : "check the question and try again");
     render(data);
     loadLog();
     $("status").hidden = true;
   } catch (err) {
     $("status").className = "status error";
-    $("status").textContent = "Sorry, the assistant couldn't answer (" + err.message + "). Please try again in a minute.";
+    $("status").textContent = `The assistant couldn't answer: ${err.message}. Try again in a minute.`;
   } finally {
-    clearInterval(tick); $("go").disabled = false;
+    clearInterval(tick); $("go").disabled = false; $("skeleton").hidden = true;
   }
 };
 
 function render({ answer, report, tool_calls, actions }) {
-  const [topic, href] = TOPICS[report.category] || TOPICS.other;
-  $("topic").replaceChildren(el("span", topic, "badge"));
-  if (href) $("topic").append(link("What's this?", href));
-  if (report.player_id != null) $("topic").append(el("span", `Player ${report.player_id}`));
-  $("cause").textContent = report.root_cause;
-  $("todo").textContent = report.recommended_action;
-  $("answer").textContent = answer;
-  $("evidence").replaceChildren(...report.evidence.map(x => el("li", x)));
+  const [topic, tip] = TOPICS[report.category] || TOPICS.other;
+  const badge = el("span", "", "badge");
+  badge.append(tip ? term(topic, tip) : topic);
+  $("tags").replaceChildren(badge);
+  if (report.player_id != null) $("tags").append(el("span", `Player ${report.player_id}`));
+  $("cause").replaceChildren(...rich(report.root_cause));
+  $("todo").replaceChildren(...rich(report.recommended_action));
+  $("answer").replaceChildren(...rich(answer));
+  $("evidence").replaceChildren(...report.evidence.map(x => { const li = el("li"); li.append(...rich(x)); return li; }));
 
   const esc = report.escalate_to_responsible_gambling;
-  const banner = el("div", "", "banner " + (esc ? "warn" : "ok"));
-  banner.append(el("strong", esc ? "⚠ Hand this player over to the Responsible Gambling team"
-                                 : "✓ No signs of gambling harm found"),
-                el("p", esc ? "The player shows signs of gambling harm. A specialist needs to review the account. "
-                              + "Make sure the \"Send to Responsible Gambling team\" action is approved, and stay "
-                              + "calm and non-judgmental with the player. "
-                            : "Nothing here needs the Responsible Gambling team. "));
-  banner.lastChild.append(link(esc ? "What does this mean?" : "What is Responsible Gambling?", esc ? "#g-escalate" : "#g-rg"));
-  $("rg").replaceChildren(banner);
+  $("result").classList.toggle("esc", esc);
+  $("rg").replaceChildren(esc ? "⚠ " : "✓ No signs of gambling harm",
+                          esc ? term("Hand this player over to the Responsible Gambling team", TIP.escalate) : "");
 
   $("suggested").hidden = !actions.length;
-  $("suggested-list").replaceChildren(...actions.map(a => actionItem(a, false)));
+  $("suggested-list").replaceChildren(...actions.map(a => {
+    const li = el("li"); li.append(actionTitle(a), el("span", " — " + a.reason, "meta")); return li;
+  }));
   $("tools").replaceChildren(...tool_calls.filter(t => t.tool in STEPS).map(t => {
     const li = el("li", STEPS[t.tool]);
     li.append(el("div", `${t.tool}(${JSON.stringify(t.args)})`, "tech"));
@@ -263,15 +250,19 @@ function render({ answer, report, tool_calls, actions }) {
   $("result").hidden = false;
 }
 
+function actionTitle(a) {
+  const [title, tip] = ACTIONS[a.action] || [a.action, null];
+  const text = title + (a.params.limit ? ` to ${a.params.limit.toLocaleString()} per week` : "");
+  const b = el("strong");
+  b.append(tip ? term(text, tip) : text);
+  return b;
+}
+
 function actionItem(a, withButtons) {
-  const [title, what, href] = ACTIONS[a.action] || [a.action, "", null];
   const li = el("li");
   const head = el("div");
-  head.append(el("strong", title + (a.params.limit ? ` to ${a.params.limit.toLocaleString()} per week` : "")),
-              ` · Player ${a.player_id}`);
-  const desc = el("div", what + " ", "meta");
-  if (href) desc.append(link("More", href));
-  li.append(head, desc, el("div", "Why: " + a.reason));
+  head.append(actionTitle(a), el("span", `  Player ${a.player_id}`, "meta"));
+  li.append(head, el("div", a.reason));
   const row = el("div", "", "row");
   if (withButtons && a.status === "pending") {
     for (const [label, approve] of [["Approve", true], ["Reject", false]]) {
@@ -282,7 +273,7 @@ function actionItem(a, withButtons) {
   } else {
     row.append(el("span", STATUS[a.status], "badge s-" + a.status));
   }
-  row.append(el("span", a.decided_by ? `${STATUS[a.status].toLowerCase()} by ${a.decided_by}, ${when(a.decided_at)}`
+  row.append(el("span", a.decided_by ? `by ${a.decided_by}, ${when(a.decided_at)}`
                                      : `suggested by ${who(a.proposed_by)}, ${when(a.proposed_at)}`, "meta"));
   li.append(row);
   return li;
@@ -293,8 +284,9 @@ async function loadLog() {
   if (!r.ok) return;
   const all = await r.json();
   const pending = all.filter(a => a.status === "pending"), done = all.filter(a => a.status !== "pending");
+  $("count").textContent = pending.length ? `(${pending.length})` : "";
   $("pending").replaceChildren(...pending.map(a => actionItem(a, true)));
-  if (!pending.length) $("pending").append(el("li", "Nothing is waiting for approval.", "meta"));
+  if (!pending.length) $("pending").append(el("li", "Nothing waiting. Suggestions from the assistant show up here.", "meta"));
   $("history").replaceChildren(...done.map(a => actionItem(a, false)));
   if (!done.length) $("history").append(el("li", "No decisions yet.", "meta"));
 }
