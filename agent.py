@@ -16,17 +16,26 @@ import os
 import re
 import sqlite3
 import sys
+import time
+import urllib.error
 import urllib.request
 from functools import cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 HERE = Path(__file__).parent
-OLLAMA = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.environ.get("MODEL", "qwen3:4b")
-TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", 900))  # seconds per LLM call; one call takes ~6 min on an old Intel CPU
+OLLAMA = os.environ.get("OLLAMA_URL", "http://localhost:11434")  # embeddings for the policy search always run locally
+# Chat model: Gemini 2.5 Flash Lite on OpenRouter when OPENROUTER_API_KEY is set (seconds per question, but the
+# player data in the prompts leaves the machine), else local Ollama. Both speak the OpenAI chat API, so the code is shared.
+# Local default is the non-thinking build: plain qwen3:4b is now a thinking-only model that writes 400-1200 tokens of
+# reasoning before every tool call (think=False can't turn it off), ~9 min per question on CPU instead of ~2.
+API_KEY = os.environ.get("OPENROUTER_API_KEY")
+LLM_URL = "https://openrouter.ai/api/v1" if API_KEY else OLLAMA + "/v1"
+LLM_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+MODEL = os.environ.get("MODEL", "google/gemini-2.5-flash-lite" if API_KEY else "qwen3:4b-instruct")
+TIMEOUT = int(os.environ.get("LLM_TIMEOUT", 900))  # seconds per call; generous, a local call is under a minute on an old Intel CPU
 EMBED_MODEL = "nomic-embed-text"
 TODAY = "2026-10-01"  # matches seed.py, so "last week" means the same thing every run
 # Read-only connection: even a buggy tool can't modify data. check_same_thread=False
@@ -35,16 +44,22 @@ DB = sqlite3.connect(f"file:{HERE / 'casino.db'}?mode=ro", uri=True, check_same_
 DB.row_factory = sqlite3.Row  # rows behave like dicts: dict(row)
 
 
-def post(path, payload):
-    req = urllib.request.Request(OLLAMA + path, json.dumps(payload).encode(),
-                                 {"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            return json.load(r)
-    except TimeoutError as e:  # a slow read raises this directly, not wrapped in URLError
-        raise RuntimeError(f"Ollama took over {TIMEOUT}s for one call (slow on CPU?). Raise OLLAMA_TIMEOUT.") from e
-    except OSError as e:  # URLError, connection refused or reset mid-call
-        raise RuntimeError(f"Can't reach Ollama at {OLLAMA}. Start it with `ollama serve`.") from e
+def post(url, payload, headers=None, tries=3):
+    """POST JSON. Retries network blips, rate limits and upstream errors (they happen on a cloud API), 1s then 2s apart."""
+    req = urllib.request.Request(url, json.dumps(payload).encode(), {"Content-Type": "application/json"} | (headers or {}))
+    for attempt in range(1, tries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                return json.load(r)
+        except TimeoutError as e:  # a slow read raises this directly, not wrapped in URLError; don't retry, it was slow
+            raise RuntimeError(f"The LLM took over {TIMEOUT}s for one call (slow on CPU?). Raise LLM_TIMEOUT.") from e
+        except urllib.error.HTTPError as e:  # e.g. 401 bad API key, 402 out of credits, 429 rate limited
+            if e.code not in (429, 500, 502, 503) or attempt == tries:
+                raise RuntimeError(f"{url} returned {e.code}: {e.read().decode(errors='replace')[:300]}") from e
+        except OSError as e:  # URLError, connection refused or reset mid-call
+            if attempt == tries:
+                raise RuntimeError(f"Can't reach {url} ({e}). If it's Ollama, start it with `ollama serve`.") from e
+        time.sleep(attempt)
 
 
 # --- Tools: plain Python functions the LLM is allowed to call ----------------
@@ -57,6 +72,8 @@ def get_player(player_id: int) -> dict:
 
 def get_transactions(player_id: int, status: str | None = None) -> list[dict]:
     """The player's deposits/withdrawals/bonuses, newest first, optionally only one status."""
+    if "error" in (player := get_player(player_id)):  # else an unknown player looks like "nothing was declined"
+        return player
     sql = "SELECT * FROM transactions WHERE player_id = ?"
     params: list = [player_id]
     if status:
@@ -68,6 +85,8 @@ def get_transactions(player_id: int, status: str | None = None) -> list[dict]:
 def get_betting_summary(player_id: int, days: int = 30) -> dict:
     """Totals over the last `days` days. The tool does the arithmetic, because
     small LLMs are bad at adding up 100 numbers; the LLM only interprets."""
+    if "error" in (player := get_player(player_id)):
+        return player
     since = f"date('{TODAY}', '-{int(days)} days')"  # int() makes the f-string safe
     row = DB.execute(f"""
         SELECT COUNT(*) AS bets, ROUND(COALESCE(SUM(stake), 0), 2) AS total_staked,
@@ -164,7 +183,8 @@ def top_risk_players(days: int = 7, limit: int = 10) -> list[dict]:
 # --- Write actions: the agent only proposes, a person approves (see actions.py) -
 ACTIONS = {
     "request_kyc_documents": "ask the player to upload a government ID and proof of address",
-    "flag_for_rg_review": "send the account to the responsible gambling team for a safer-gambling interaction",
+    "flag_for_rg_review": "send the account to the responsible gambling team; use it whenever a policy says to "
+                          "escalate to or notify the responsible gambling team",
     "apply_deposit_limit": "set a weekly deposit limit (needs weekly_deposit_limit); can only lower an existing limit",
     "block_account": "block the account, for fraud or abuse (not for self-excluded players, they stay excluded)",
 }
@@ -193,7 +213,7 @@ def propose_action(player_id: int, action: str, reason: str, weekly_deposit_limi
 
 # --- RAG over policies.md: one chunk per "## " section ------------------------
 def embed(texts):
-    return post("/api/embed", {"model": EMBED_MODEL, "input": texts})["embeddings"]
+    return post(OLLAMA + "/api/embed", {"model": EMBED_MODEL, "input": texts})["embeddings"]
 
 
 def cosine(a, b):
@@ -207,9 +227,13 @@ def policy_index():
     return list(zip(sections, embed(["search_document: " + s for s in sections])))
 
 
-def search_policy(query: str, k: int = 2) -> list[str]:
+def search_policy(query: str, k: int = 3) -> dict:
     q = embed(["search_query: " + query])[0]
-    return [s for s, _ in sorted(policy_index(), key=lambda p: -cosine(q, p[1]))[:k]]
+    # The reminder rides along with the policy, the moment the model reads it: small models otherwise write
+    # "I propose to flag this account" in the answer without calling the tool, so no proposal exists.
+    return {"sections": [s for s, _ in sorted(policy_index(), key=lambda p: -cosine(q, p[1]))[:k]],
+            "next_step": "If a section says to do something that matches an available action, call propose_action "
+                         "now. Writing that you propose it in your answer does not create a proposal."}
 
 
 TOOLS = {"get_player": get_player, "get_transactions": get_transactions,
@@ -247,7 +271,8 @@ TOOL_SPECS = [
          {"days": {"type": "integer", "description": "Look-back window, default 7."},
           "limit": {"type": "integer", "description": "How many players, default 10."}}, []),
     spec("search_policy", "Search the platform's policies (KYC, bonus wagering, responsible gambling, "
-         "deposit limits, self-exclusion, withdrawals). Use it to explain a decline reason or decide what to do.",
+         "deposit limits, self-exclusion, withdrawals). Use it to explain a decline reason or decide what to do. "
+         "Search for the specific issue, e.g. the decline reason.",
          {"query": {"type": "string"}}, ["query"]),
     spec("propose_action", "Propose an action on a player's account. It is NOT carried out: a person must "
          "approve it first. Actions: " + "; ".join(f"{k}: {v}" for k, v in ACTIONS.items()) + ".",
@@ -277,41 +302,56 @@ def call_tool(name, args):
 
 
 def chat(messages, **extra):
-    payload = {"model": MODEL, "messages": messages, "stream": False,
-               "think": False, "options": {"temperature": 0}} | extra  # think=False: skip qwen3's slow reasoning
-    return post("/api/chat", payload)["message"]
+    payload = {"model": MODEL, "messages": messages, "temperature": 0} | extra
+    return post(LLM_URL + "/chat/completions", payload, LLM_HEADERS)["choices"][0]["message"]
+
+
+NUDGE = ("Before your final answer: if you haven't yet, look up the relevant policy with search_policy. "
+         "If the policy says to do something that matches one of the available actions (for example notify or "
+         "escalate to the responsible gambling team, or ask for documents), propose it with propose_action. "
+         "Don't propose actions the policy doesn't call for. Then write your complete final answer again: "
+         "what happened, the data and the policy it is based on, and any action you proposed.")
 
 
 def run_agent(question, max_steps=8, verbose=True):
     """Returns (final answer text, list of tool calls made)."""
     messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": question}]
-    trace = []
+    trace, nudged = [], False
     for _ in range(max_steps):
-        msg = chat(messages, tools=TOOL_SPECS)
+        # The first step must call a tool: every question needs data, and Gemini Flash Lite otherwise answers
+        # from nothing ("declined for bonus wagering" for a KYC case), even claiming it checked the transactions.
+        msg = chat(messages, tools=TOOL_SPECS, **({} if trace else {"tool_choice": "required"}))
         messages.append(msg)  # the model needs to see its own tool calls in the history
         if not msg.get("tool_calls"):
-            # Guardrail: small models often stop at the decline code. Make them read
-            # the policy once, so the answer says what to actually do about it.
-            if not any(t["tool"] == "search_policy" for t in trace):
+            # Guardrail, once: small models stop at the decline code and rarely propose an action
+            # on their own. Ask them to read the policy and propose what it calls for, then accept the answer.
+            if not nudged and not {"search_policy", "propose_action"} <= {t["tool"] for t in trace}:
+                nudged, first = True, msg
                 trace.append({"tool": "(nudge)", "args": {}})
-                messages.append({"role": "user", "content": "Before answering, look up the relevant "
-                                 "policy with search_policy and use it in your answer."})
+                messages.append({"role": "user", "content": NUDGE})
                 continue
-            return re.sub(r"<think>.*?</think>", "", msg["content"], flags=re.S).strip(), trace
+            if nudged and trace[-1]["tool"] == "(nudge)":  # no tool calls since the nudge: the first answer stands
+                msg = first  # (re-answering with nothing new garbled it: "I can't find player 9999" -> "what's the ID?")
+            return re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S).strip(), trace
         for call in msg["tool_calls"]:
-            name, args = call["function"]["name"], call["function"]["arguments"]
-            result = call_tool(name, args)
+            name = call["function"]["name"]
+            try:  # the arguments arrive as a JSON string, and the model can get it wrong
+                args = json.loads(call["function"]["arguments"] or "{}")
+                result = call_tool(name, args)
+            except json.JSONDecodeError as e:
+                args, result = {}, {"error": f"arguments are not valid JSON: {e}"}
             trace.append({"tool": name, "args": args})
             if name == "propose_action" and "proposal" in result:
                 trace[-1]["proposal"] = result["proposal"]
             if verbose:
                 print(f"  -> {name}({args})", file=sys.stderr)
-            messages.append({"role": "tool", "tool_name": name, "content": json.dumps(result, default=str)})
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, default=str)})
     return "Stopped: too many steps without an answer.", trace
 
 
 # --- Structured output: free text -> typed, validated Report -----------------
 class Report(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # additionalProperties: false, which strict JSON schema mode requires
     player_id: int | None
     category: Literal["kyc", "bonus_wagering", "responsible_gambling", "self_exclusion", "other"] = Field(
         description="kyc: identity not verified (kyc_not_verified). bonus_wagering: bonus not wagered "
@@ -324,12 +364,13 @@ class Report(BaseModel):
 
 
 def to_report(question, answer) -> Report:
-    """Ollama constrains generation to the JSON schema, so the output always parses;
+    """The API constrains generation to the JSON schema (structured outputs), so the output parses;
     pydantic then validates it. Done as a separate call because small models
     handle tools and a forced JSON format badly at the same time."""
     msg = chat([{"role": "user", "content": f"Question: {question}\n\nInvestigation result:\n{answer}\n\n"
                  "Fill in the report from the investigation result. Do not add facts that are not in it."}],
-               format=Report.model_json_schema())
+               response_format={"type": "json_schema", "json_schema": {
+                   "name": "report", "strict": True, "schema": Report.model_json_schema()}})
     return Report.model_validate_json(msg["content"])
 
 

@@ -8,7 +8,7 @@ An LLM agent that investigates player issues on a (fake) online casino platform,
 
 The agent looks up the player's data with **tools** (SQL over a casino database), reads the relevant **policy** (RAG), and returns a free-text answer and a **typed, validated report** (category, root cause, evidence, recommended action, escalation flag), served over a **FastAPI** endpoint. It can also **propose actions** (request KYC documents, flag for RG review, set a deposit limit, block an account). They only happen after a person approves them in the UI, and every decision goes into an audit log.
 
-Everything runs locally and free with [Ollama](https://ollama.com) (`qwen3:4b`). There are no API keys and no frameworks: the agent loop is about 30 lines of plain Python, so every step is visible.
+The chat model is **Gemini 2.5 Flash Lite via [OpenRouter](https://openrouter.ai)** when `OPENROUTER_API_KEY` is set, and otherwise runs locally and free with [Ollama](https://ollama.com) (`qwen3:4b-instruct`). Both speak the OpenAI chat API, so the agent code is the same; only the URL changes. The trade-off: OpenRouter answers in seconds, but the player data in the prompts leaves the machine. That's fine for this fake data, but real player data would need a data-processing agreement, or the local model. Policy embeddings (`nomic-embed-text`) always run locally. For the local model, use the non-thinking build: plain `qwen3:4b` always reasons before answering and is about 4x slower on CPU. There are no frameworks: the agent loop is about 30 lines of plain Python, so every step is visible.
 
 ## How it works
 
@@ -36,7 +36,7 @@ flowchart LR
    - `top_risk_players`: the same score for every player, ranked, so the agent can answer "who is most at risk this week?" instead of only questions about one player
    - `search_policy`: RAG over `policies.md` (one chunk per section, `nomic-embed-text`, cosine similarity)
    - `propose_action`: proposes `request_kyc_documents`, `flag_for_rg_review`, `apply_deposit_limit` or `block_account`. It changes nothing (see below)
-3. **Structured output** (`to_report`): a second call with Ollama's `format=<JSON schema>` constrains generation to the `Report` schema, and pydantic validates it. This is a separate call because small models handle tools and forced JSON badly at the same time.
+3. **Structured output** (`to_report`): a second call with `response_format` (strict JSON schema, structured outputs) constrains generation to the `Report` schema, and pydantic validates it. This is a separate call because small models handle tools and forced JSON badly at the same time.
 
 ### Responsible gambling risk score
 
@@ -82,10 +82,13 @@ curl -X POST localhost:8000/actions/1/decision -u j.smith:secret1 -H 'Content-Ty
 | Rewriting the audit trail | DB triggers: no deletes, a decision is final, proposals can't be edited |
 | Two people deciding the same action | The decision only applies `WHERE status = 'pending'`; the second one gets `409` |
 | Hallucinated tool name or bad arguments | `call_tool` returns the error *to the model* so it can retry, instead of crashing |
-| Shallow answers ("declined: kyc_not_verified", no next step) | Guardrail: if the model tries to answer without checking policy, it is nudged once to call `search_policy` |
+| Answering from nothing (Gemini Flash Lite said "bonus wagering" for a KYC case without looking anything up) | The first step must call a tool (`tool_choice: required`) |
+| Shallow answers ("declined: kyc_not_verified", no next step) and no proposals | Guardrail, once: before the final answer the model is asked to read the policy and propose what it calls for. If it does nothing new, its first answer stands |
+| Saying "I propose to flag this account" without calling the tool | `search_policy` returns a reminder with the policy text: writing it in the answer doesn't create a proposal |
+| Network blips and rate limits on the cloud API | Up to 3 tries for dropped connections, `429` and `5xx`; a bad key (`401`) fails at once |
 | Infinite tool loops | `max_steps=8` |
 | Unparseable output | Schema-constrained decoding plus pydantic validation |
-| Ollama down, dropping the connection or too slow | API returns `503` with a clear message; each LLM call times out after `OLLAMA_TIMEOUT` seconds (default 900; a single call took up to ~6.5 min on an Intel MacBook CPU) |
+| LLM down, too slow, bad API key or rate limited | API returns `503` with a clear message (including OpenRouter's error); each LLM call times out after `LLM_TIMEOUT` seconds (default 900, for slow local CPUs) |
 
 ## The data
 
@@ -102,7 +105,9 @@ curl -X POST localhost:8000/actions/1/decision -u j.smith:secret1 -H 'Content-Ty
 ## Quick start
 
 ```bash
-ollama pull qwen3:4b && ollama pull nomic-embed-text
+ollama pull nomic-embed-text                          # policy search embeddings (always local)
+echo 'OPENROUTER_API_KEY=sk-or-...' > .env            # Gemini via OpenRouter; git-ignored
+set -a; source .env; set +a                           # or skip both lines and `ollama pull qwen3:4b-instruct`
 pip install -r requirements.txt
 python seed.py                                        # build casino.db
 
@@ -117,11 +122,11 @@ curl -X POST localhost:8000/investigate -H 'Content-Type: application/json' \
 
 ### Docker
 
-Ollama stays on the host (the models are GBs). The container reaches it through `host.docker.internal`:
+Ollama (embeddings, and the chat model without a key) stays on the host. The container reaches it through `host.docker.internal`:
 
 ```bash
 docker build -t igaming-agent .
-docker run -p 8000:8000 -e APPROVERS=j.smith:secret1 igaming-agent
+docker run -p 8000:8000 -e APPROVERS=j.smith:secret1 --env-file .env igaming-agent
 ```
 
 ## Testing and eval
@@ -134,6 +139,13 @@ python eval.py         # end-to-end on the planted cases (slow on CPU, real LLM)
 `eval.py` runs the whole agent on each case in `eval_cases.json` and checks four things: the report's **category**, its **escalation flag**, whether the **answer** mentions the key fact (for example "3500" for the bonus case), and whether the agent **proposed the right actions** (for example `request_kyc_documents` for 1042, never `block_account` for the self-excluded 1150). One case is a player who doesn't exist, to check that the agent says so instead of making up a reason. Swap models with `MODEL=llama3.1:8b python eval.py`.
 
 <!-- EVAL_RESULTS -->
+Latest run (`eval_out.txt`):
+
+| Model | Fully correct | Category | Escalation | Answer | Actions | Time per case |
+|---|---|---|---|---|---|---|
+| `google/gemini-2.5-flash-lite` (OpenRouter) | **7/7** | 7/7 | 7/7 | 7/7 | 7/7 | ~6 s |
+
+The eval found real bugs on the way there: the agent never proposed any action, the nudge looped until it ran out of steps, an unknown player looked like "nothing was declined", and plain `qwen3:4b` spent ~90% of its time writing hidden reasoning. The local `qwen3:4b-instruct` gives the right answer and proposal on the KYC case in about 5 minutes on an Intel CPU; a full local run takes about 30 minutes.
 
 ## What I'd do next
 

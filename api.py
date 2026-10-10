@@ -56,7 +56,7 @@ class Decision(BaseModel):
 def post_investigate(q: Question):  # plain def: FastAPI runs it in a thread, so slow LLM calls don't block
     try:
         r = investigate(q.question)
-    except RuntimeError as e:  # Ollama unreachable
+    except RuntimeError as e:  # LLM unreachable or API error (bad key, rate limit)
         raise HTTPException(503, str(e))
     r["actions"] = [actions.propose(**p, question=q.question, proposed_by=f"agent:{MODEL}")
                     for p in r.pop("proposals")]

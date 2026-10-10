@@ -1,6 +1,6 @@
 """End-to-end eval: run the full agent on the planted cases from seed.py and
 check the structured report (category, escalation), the answer text, and the proposed actions.
-Slow on CPU (a few minutes per case), because every case runs the real LLM.
+Slow on CPU (about 2 minutes per case), because every case runs the real LLM.
 
 Run:  python eval.py            (MODEL=llama3.1:8b python eval.py to compare models)
 """

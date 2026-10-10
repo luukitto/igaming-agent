@@ -4,7 +4,7 @@
    "propose_any": ["request_kyc_documents"]},
   {"question": "Player 1077 says their withdrawal was rejected unfairly. What happened?",
    "category": "bonus_wagering", "escalate": false, "mention_any": ["3500", "3,500", "35x", "35 times"],
-   "never_propose": ["block_account", "apply_deposit_limit", "request_kyc_documents"]},
+   "never_propose": ["block_account", "apply_deposit_limit", "request_kyc_documents", "flag_for_rg_review"]},
   {"question": "Is there anything concerning about player 1100's recent activity?",
    "category": "responsible_gambling", "escalate": true, "mention_any": ["escalat", "night", "am"],
    "propose_any": ["flag_for_rg_review", "apply_deposit_limit"]},
@@ -17,6 +17,6 @@
   {"question": "Which players are most at risk this week?",
    "category": "responsible_gambling", "escalate": true, "mention_any": ["1180"]},
   {"question": "Why was player 9999's withdrawal declined?",
-   "category": "other", "escalate": false, "mention_any": ["no player", "not found", "does not exist", "doesn't exist", "no record"],
+   "category": "other", "escalate": false, "mention_any": ["no player", "not found", "does not exist", "doesn't exist", "no record", "cannot find", "can't find", "couldn't find"],
    "never_propose": ["request_kyc_documents", "flag_for_rg_review", "apply_deposit_limit", "block_account"]}
 ]

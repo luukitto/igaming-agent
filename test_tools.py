@@ -35,6 +35,8 @@ assert [p["player_id"] for p in top_risk_players()] == [1100, 1180]
 assert "raises stakes after losses (loss chasing)" in get_rg_signals(1180)["reasons"]
 assert get_rg_signals(1180)["cancelled_withdrawals_gambled"] == 2
 assert get_rg_signals(1042)["risk_score"] == 0 and "error" in get_rg_signals(9999)
+# an unknown player is an error, not empty data (which reads as "nothing was declined")
+assert "error" in get_transactions(9999) and "error" in get_betting_summary(9999)
 
 # --- write actions: the agent only proposes; the tool itself writes nothing
 assert "error" in propose_action(1100, "delete_player", "x")
@@ -44,6 +46,36 @@ assert "error" in propose_action(9999, "block_account", "x")
 assert "error" in propose_action(1150, "block_account", "x")  # self-excluded
 assert "error" in propose_action(1100, "apply_deposit_limit", "x", weekly_deposit_limit=5000)  # current is 3500
 p = propose_action(1100, "apply_deposit_limit", "RG", weekly_deposit_limit=500)["proposal"]
+
+# the guardrail nudges once, then accepts the answer (it used to nudge until max_steps ran out)
+import agent
+calls = []
+# and if the model does nothing new after the nudge, its first answer stands (re-answering garbled it)
+agent.chat, real_chat = (lambda messages, **kw: calls.append(1) or {"role": "assistant", "content": f"answer {len(calls)}"}), agent.chat
+answer, trace = agent.run_agent("q", verbose=False)
+assert answer == "answer 1" and len(calls) == 2 and [t["tool"] for t in trace] == ["(nudge)"]
+agent.chat = real_chat
+
+# post() retries a dropped connection, but not a bad API key
+import io, urllib.error
+real_urlopen, real_sleep, calls = agent.urllib.request.urlopen, agent.time.sleep, []
+def flaky(req, timeout):
+    calls.append(1)
+    if len(calls) < 3:
+        raise urllib.error.URLError("connection reset")
+    return io.BytesIO(b'{"ok": true}')
+def unauthorized(req, timeout):
+    calls.append(1)
+    raise urllib.error.HTTPError("http://x", 401, "no", {}, io.BytesIO(b"bad key"))
+agent.urllib.request.urlopen, agent.time.sleep = flaky, lambda s: None
+assert agent.post("http://x", {}) == {"ok": True} and len(calls) == 3
+agent.urllib.request.urlopen = unauthorized
+calls.clear()
+try:
+    agent.post("http://x", {}); raise AssertionError("401 not raised")
+except RuntimeError as e:
+    assert "401" in str(e) and len(calls) == 1
+agent.urllib.request.urlopen, agent.time.sleep = real_urlopen, real_sleep
 
 # approvals run against a throwaway copy of the DB, so tests never add to the real audit log
 actions.PATH = Path(tempfile.mkdtemp()) / "casino.db"
