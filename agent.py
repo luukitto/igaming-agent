@@ -26,7 +26,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 HERE = Path(__file__).parent
-OLLAMA = os.environ.get("OLLAMA_URL", "http://localhost:11434")  # embeddings for the policy search always run locally
+OLLAMA = os.environ.get("OLLAMA_URL", "http://localhost:11434")  # local chat model and policy embeddings, when there is no API key
 # Chat model: Gemini 2.5 Flash Lite on OpenRouter when OPENROUTER_API_KEY is set (seconds per question, but the
 # player data in the prompts leaves the machine), else local Ollama. Both speak the OpenAI chat API, so the code is shared.
 # Local default is the non-thinking build: plain qwen3:4b is now a thinking-only model that writes 400-1200 tokens of
@@ -36,7 +36,7 @@ LLM_URL = "https://openrouter.ai/api/v1" if API_KEY else OLLAMA + "/v1"
 LLM_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
 MODEL = os.environ.get("MODEL", "google/gemini-2.5-flash-lite" if API_KEY else "qwen3:4b-instruct")
 TIMEOUT = int(os.environ.get("LLM_TIMEOUT", 900))  # seconds per call; generous, a local call is under a minute on an old Intel CPU
-EMBED_MODEL = "nomic-embed-text"
+EMBED_MODEL = "nomic-embed-text"  # local only; with an API key, embed() uses openai/text-embedding-3-small
 TODAY = "2026-10-01"  # matches seed.py, so "last week" means the same thing every run
 # Read-only connection: even a buggy tool can't modify data. check_same_thread=False
 # because FastAPI runs requests in worker threads (reads only, so sharing is safe).
@@ -212,8 +212,13 @@ def propose_action(player_id: int, action: str, reason: str, weekly_deposit_limi
 
 
 # --- RAG over policies.md: one chunk per "## " section ------------------------
-def embed(texts):
-    return post(OLLAMA + "/api/embed", {"model": EMBED_MODEL, "input": texts})["embeddings"]
+def embed(texts, task):
+    """task is "search_document" or "search_query". With an API key the embeddings come from OpenRouter too, so a
+    cloud deploy needs no Ollama; otherwise nomic-embed-text runs locally and wants the task as a text prefix."""
+    if API_KEY:
+        r = post(LLM_URL + "/embeddings", {"model": "openai/text-embedding-3-small", "input": texts}, LLM_HEADERS)
+        return [d["embedding"] for d in r["data"]]
+    return post(OLLAMA + "/api/embed", {"model": EMBED_MODEL, "input": [f"{task}: {t}" for t in texts]})["embeddings"]
 
 
 def cosine(a, b):
@@ -224,11 +229,11 @@ def cosine(a, b):
 def policy_index():
     sections = ["## " + s.strip() for s in (HERE / "policies.md").read_text().split("\n## ")[1:]]
     # ponytail: 6 sections, brute-force cosine in Python; use a vector DB (see pdf_chatbot) past ~1000 chunks
-    return list(zip(sections, embed(["search_document: " + s for s in sections])))
+    return list(zip(sections, embed(sections, "search_document")))
 
 
 def search_policy(query: str, k: int = 3) -> dict:
-    q = embed(["search_query: " + query])[0]
+    q = embed([query], "search_query")[0]
     # The reminder rides along with the policy, the moment the model reads it: small models otherwise write
     # "I propose to flag this account" in the answer without calling the tool, so no proposal exists.
     return {"sections": [s for s, _ in sorted(policy_index(), key=lambda p: -cosine(q, p[1]))[:k]],

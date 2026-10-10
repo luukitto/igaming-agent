@@ -8,7 +8,7 @@ An LLM agent that investigates player issues on a (fake) online casino platform,
 
 The agent looks up the player's data with **tools** (SQL over a casino database), reads the relevant **policy** (RAG), and returns a free-text answer and a **typed, validated report** (category, root cause, evidence, recommended action, escalation flag), served over a **FastAPI** endpoint. It can also **propose actions** (request KYC documents, flag for RG review, set a deposit limit, block an account). They only happen after a person approves them in the UI, and every decision goes into an audit log.
 
-The chat model is **Gemini 2.5 Flash Lite via [OpenRouter](https://openrouter.ai)** when `OPENROUTER_API_KEY` is set, and otherwise runs locally and free with [Ollama](https://ollama.com) (`qwen3:4b-instruct`). Both speak the OpenAI chat API, so the agent code is the same; only the URL changes. The trade-off: OpenRouter answers in seconds, but the player data in the prompts leaves the machine. That's fine for this fake data, but real player data would need a data-processing agreement, or the local model. Policy embeddings (`nomic-embed-text`) always run locally. For the local model, use the non-thinking build: plain `qwen3:4b` always reasons before answering and is about 4x slower on CPU. There are no frameworks: the agent loop is about 30 lines of plain Python, so every step is visible.
+The chat model is **Gemini 2.5 Flash Lite via [OpenRouter](https://openrouter.ai)** when `OPENROUTER_API_KEY` is set, and otherwise runs locally and free with [Ollama](https://ollama.com) (`qwen3:4b-instruct`). Both speak the OpenAI chat API, so the agent code is the same; only the URL changes. The trade-off: OpenRouter answers in seconds, but the player data in the prompts leaves the machine. That's fine for this fake data, but real player data would need a data-processing agreement, or the local model. Policy embeddings follow the same switch: `openai/text-embedding-3-small` through OpenRouter with the key, `nomic-embed-text` on Ollama without it, so a cloud deploy needs no Ollama. For the local model, use the non-thinking build: plain `qwen3:4b` always reasons before answering and is about 4x slower on CPU. There are no frameworks: the agent loop is about 30 lines of plain Python, so every step is visible.
 
 ## How it works
 
@@ -34,7 +34,7 @@ flowchart LR
    - `get_betting_summary`: totals computed in SQL (staked, payout, net, share of bets placed between midnight and 5 am, wagered since the last bonus). The tool does the arithmetic because small LLMs can't reliably add up 100 numbers.
    - `get_rg_signals`: responsible gambling signals for one player (see below) and a 0 to 100 risk score with reasons
    - `top_risk_players`: the same score for every player, ranked, so the agent can answer "who is most at risk this week?" instead of only questions about one player
-   - `search_policy`: RAG over `policies.md` (one chunk per section, `nomic-embed-text`, cosine similarity)
+   - `search_policy`: RAG over `policies.md` (one chunk per section, embeddings, cosine similarity)
    - `propose_action`: proposes `request_kyc_documents`, `flag_for_rg_review`, `apply_deposit_limit` or `block_account`. It changes nothing (see below)
 3. **Structured output** (`to_report`): a second call with `response_format` (strict JSON schema, structured outputs) constrains generation to the `Report` schema, and pydantic validates it. This is a separate call because small models handle tools and forced JSON badly at the same time.
 
@@ -105,7 +105,7 @@ curl -X POST localhost:8000/actions/1/decision -u j.smith:secret1 -H 'Content-Ty
 ## Quick start
 
 ```bash
-ollama pull nomic-embed-text                          # policy search embeddings (always local)
+ollama pull nomic-embed-text                          # policy search embeddings; not needed with an OpenRouter key
 echo 'OPENROUTER_API_KEY=sk-or-...' > .env            # Gemini via OpenRouter; git-ignored
 set -a; source .env; set +a                           # or skip both lines and `ollama pull qwen3:4b-instruct`
 pip install -r requirements.txt
@@ -122,7 +122,7 @@ curl -X POST localhost:8000/investigate -H 'Content-Type: application/json' \
 
 ### Docker
 
-Ollama (embeddings, and the chat model without a key) stays on the host. The container reaches it through `host.docker.internal`:
+With `OPENROUTER_API_KEY` in `.env`, the container needs nothing else, so it also runs on a cloud host such as Railway (it listens on `$PORT`). Without the key, Ollama stays on the host. The container reaches it through `host.docker.internal`:
 
 ```bash
 docker build -t igaming-agent .
